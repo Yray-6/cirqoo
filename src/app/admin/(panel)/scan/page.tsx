@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { useAdminStore, type ScanResult } from "@/components/admin/admin-store";
+import { TicketCamera } from "@/components/admin/ticket-camera";
 import { PageHeading, fieldClass, primaryButtonClass } from "@/components/admin/ui";
 import { formatWhen, ticketLabel } from "@/lib/admin-mock";
 
@@ -22,12 +23,12 @@ export default function ScanPage() {
   return (
     <div className="mx-auto flex max-w-xl flex-col gap-6">
       <PageHeading title="Scan Tickets" />
-      <div className="relative mx-auto aspect-square w-full max-w-[280px] overflow-hidden rounded-3xl bg-ink">
-        <div className="absolute inset-8 rounded-2xl border-2 border-white/80" />
-        <p className="absolute inset-x-0 bottom-5 text-center text-xs text-white/80">
-          Camera preview
-        </p>
-      </div>
+      <TicketCamera
+        onCode={(value) => {
+          setResult(store.scan(value));
+          setCode("");
+        }}
+      />
       <form onSubmit={onSubmit} className="flex flex-col gap-3">
         <label className="flex flex-col gap-1.5 text-sm font-bold text-ink">
           Ticket code
@@ -44,7 +45,7 @@ export default function ScanPage() {
           Check ticket
         </button>
         <p className="text-sm text-muted">
-          Try CRQ-OPEN02 for a sold ticket, or CRQ-USED01 for one that is already used.
+          Point the camera at the ticket QR, or type a code such as CRQ-OPEN02.
         </p>
       </form>
       {result ? (
