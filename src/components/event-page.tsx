@@ -56,15 +56,7 @@ export function EventPage({ soldOut = false }: { soldOut?: boolean }) {
               width={696}
               height={870}
               priority
-              className="h-auto w-full rounded-[10px] min-[1100px]:hidden"
-            />
-            <Image
-              src="/flyer.png"
-              alt="Cirqoo After Hours karaoke and games flyer. Ticket price ₦15k, Friday, November 6th, 2026 at Halo Lagos, Lekki."
-              width={960}
-              height={1201}
-              priority
-              className="hidden h-auto w-full min-[1100px]:block"
+              className="h-auto w-full rounded-[10px] min-[1100px]:rounded-none"
             />
           </div>
           {soldOut ? (
