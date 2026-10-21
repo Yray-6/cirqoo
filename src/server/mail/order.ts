@@ -2,6 +2,7 @@ import "server-only";
 
 import { getSql } from "@/server/db";
 import { HttpError } from "@/server/http";
+import { asDate } from "@/server/time";
 
 export type MailOrder = {
   id: string;
@@ -76,6 +77,12 @@ export async function loadMailOrder(orderId: string) {
   `;
   const order = orders[0];
   if (!order) throw new HttpError(404, "Order not found.");
+  const startsAt = asDate(order.starts_at);
+  const endsAt = asDate(order.ends_at);
+  if (!startsAt || !endsAt) throw new HttpError(500, "This event has no valid start or end time.");
+  order.starts_at = startsAt;
+  order.ends_at = endsAt;
+  order.paid_at = asDate(order.paid_at);
   const lines = await sql<MailLine[]>`
     SELECT tiers.name AS tier_name, COUNT(*)::int AS quantity, tiers.price_kobo
     FROM tickets
