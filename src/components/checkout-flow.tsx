@@ -511,6 +511,32 @@ export function CheckoutFlow() {
   );
 }
 
+function TicketFace({ name, price }: { name: string; price: number }) {
+  return (
+    <div className="relative aspect-[567/232] w-full overflow-hidden rounded-[10px] bg-white shadow-[0_12px_28px_rgba(31,36,47,0.16)] min-[1100px]:w-1/2">
+      <Image
+        src="/ticket-card/face.png"
+        alt=""
+        fill
+        sizes="(min-width: 1100px) 360px, 100vw"
+        className="object-cover object-left"
+      />
+      <div className="absolute inset-y-0 right-0 flex w-[37.7%] flex-col items-center justify-center bg-white px-2 text-center">
+        <p className="text-sm leading-tight font-extrabold text-black">
+          {name}
+        </p>
+        <p className="mt-1 text-sm leading-tight font-bold text-black">
+          {naira(price)}
+        </p>
+      </div>
+      <span
+        aria-hidden="true"
+        className="absolute top-1/2 right-0 aspect-square w-[6.35%] translate-x-1/2 -translate-y-1/2 rounded-full bg-[#444444]"
+      />
+    </div>
+  );
+}
+
 function TicketStep({
   tiers,
   loading,
@@ -538,14 +564,37 @@ function TicketStep({
         </button>
         <h1 className={stepTitle}>Choose Tickets</h1>
       </div>
-      <div className="flex flex-col gap-7 min-[1100px]:gap-8 min-[1100px]:pt-2.5">
+      <div className="flex flex-col min-[1100px]:pt-2.5">
         {loading ? (
           <p className="text-sm text-muted">Loading tickets…</p>
         ) : tiers.length === 0 ? (
           <p className="text-sm text-muted">Tickets are not on sale right now.</p>
         ) : null}
-        {tiers.map((ticket) => (
-          <article key={ticket.id} className="border-b border-line pb-7 min-[1100px]:pb-8">
+        {tiers.map((ticket, index) => {
+          const selected = (quantities[ticket.id] ?? 0) > 0;
+          return (
+            <article
+              key={ticket.id}
+              className={`flex flex-col pb-7 min-[1100px]:pb-8 ${
+                index > 0 ? "border-t border-[#E4E5E7] pt-7 min-[1100px]:pt-8" : ""
+              }`}
+            >
+            <div
+              aria-hidden={!selected}
+              className={`grid transition-[grid-template-rows,opacity] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
+                selected ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+              }`}
+            >
+              <div className="overflow-hidden">
+                <div
+                  className={`origin-top px-1 pt-1 pb-5 transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
+                    selected ? "translate-y-0 scale-100" : "-translate-y-4 scale-[0.98]"
+                  }`}
+                >
+                  <TicketFace name={ticket.name} price={ticket.price} />
+                </div>
+              </div>
+            </div>
             <div className="flex items-start justify-between gap-3 min-[1100px]:gap-6">
               <div className="min-w-0">
                 <h2 className="text-base font-bold leading-6 text-ink min-[1100px]:text-lg min-[1100px]:font-black min-[1100px]:leading-[30px] min-[1100px]:tracking-[0.02em]">
@@ -592,8 +641,9 @@ function TicketStep({
             <p className="mt-3 text-sm leading-[22px] text-[#61646C] min-[1100px]:hidden">
               {ticket.description}
             </p>
-          </article>
-        ))}
+            </article>
+          );
+        })}
       </div>
     </div>
   );
