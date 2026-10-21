@@ -91,6 +91,9 @@ export type AdminOrder = {
   total: number;
   heldUntil: string | null;
   emailError: string | null;
+  paymentReference: string | null;
+  paymentError: string | null;
+  paid: boolean;
   ticketCount: number;
 };
 

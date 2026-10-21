@@ -213,8 +213,13 @@ export async function provisionTickets(eventId: string, tierId: string, count: n
 export async function saveLead(email: string, source: "newsletter" | "checkout") {
   const normalized = email.trim().toLowerCase();
   if (!validEmail(normalized)) throw new HttpError(400, "Enter a valid email address.");
-  await getDb()
+  const inserted = await getDb()
     .insert(leads)
     .values({ id: randomUUID(), email: normalized, source })
-    .onConflictDoNothing();
+    .onConflictDoNothing()
+    .returning({ id: leads.id });
+  if (inserted.length > 0) {
+    const { fireAndForget, sendWelcomeEmail } = await import("@/server/mail");
+    fireAndForget(sendWelcomeEmail(normalized), "welcome email");
+  }
 }

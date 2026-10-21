@@ -37,6 +37,8 @@ type HoldResult = {
   confirmed: boolean;
 };
 
+type Recipient = { name: string; email: string };
+
 type Contact = {
   firstName: string;
   lastName: string;
@@ -44,7 +46,13 @@ type Contact = {
   confirmEmail: string;
   phone: string;
   separateEmails: boolean;
+  recipients: Record<string, Recipient>;
 };
+
+/** One slot per ticket, keyed by tier and index, so entries survive quantity changes. */
+type RecipientSlot = { key: string; tierId: string; tierName: string; index: number; count: number };
+
+type RecipientErrors = Record<string, Partial<Recipient>>;
 
 const emptyContact: Contact = {
   firstName: "",
@@ -53,6 +61,7 @@ const emptyContact: Contact = {
   confirmEmail: "",
   phone: "",
   separateEmails: false,
+  recipients: {},
 };
 
 const stepOrder: Step[] = ["tickets", "contact", "payment"];
@@ -69,10 +78,10 @@ function validEmail(value: string) {
 }
 
 const actionButton =
-  "flex h-[52px] w-full items-center justify-center rounded-lg text-xs font-semibold text-white enabled:bg-[#3F3F3F] enabled:hover:bg-[#2c2c2c] disabled:bg-[#CECECE] min-[1100px]:h-auto min-[1100px]:py-4 min-[1100px]:text-base min-[1100px]:leading-5 min-[1100px]:font-normal min-[1100px]:enabled:bg-brand min-[1100px]:enabled:hover:bg-[#e4572c] min-[1100px]:disabled:bg-[#ECECED] min-[1100px]:disabled:text-[#61646C] min-[1100px]:disabled:opacity-75";
+  "flex h-[52px] w-full items-center justify-center rounded-lg text-base font-semibold text-white enabled:bg-[#3F3F3F] enabled:hover:bg-[#2c2c2c] disabled:bg-[#CECECE] min-[1100px]:h-auto min-[1100px]:py-4 min-[1100px]:leading-5 min-[1100px]:font-normal min-[1100px]:enabled:bg-brand min-[1100px]:enabled:hover:bg-[#e4572c] min-[1100px]:disabled:bg-[#ECECED] min-[1100px]:disabled:text-[#61646C] min-[1100px]:disabled:opacity-75";
 
 const stepTitle =
-  "text-xs font-bold leading-8 text-ink min-[1100px]:text-2xl min-[1100px]:font-black";
+  "text-xl font-bold leading-8 text-ink min-[1100px]:text-2xl min-[1100px]:font-black";
 
 export function CheckoutFlow() {
   const router = useRouter();
@@ -83,6 +92,8 @@ export function CheckoutFlow() {
   const [contact, setContact] = useState<Contact>(emptyContact);
   const [showErrors, setShowErrors] = useState(false);
   const [holdError, setHoldError] = useState("");
+  const [payError, setPayError] = useState("");
+  const [redirecting, setRedirecting] = useState(false);
   const [pending, setPending] = useState(false);
   const [code, setCode] = useState("");
   const [quote, setQuote] = useState<Quote | null>(null);
@@ -156,7 +167,26 @@ export function CheckoutFlow() {
     }
     return errors;
   }, [contact]);
-  const contactReady = Object.keys(contactErrors).length === 0;
+  const recipientSlots: RecipientSlot[] = lines.flatMap((line) =>
+    Array.from({ length: line.quantity }, (_, index) => ({
+      key: `${line.id}:${index}`,
+      tierId: line.id,
+      tierName: line.name,
+      index,
+      count: line.quantity,
+    })),
+  );
+  const recipientErrors: RecipientErrors = {};
+  if (contact.separateEmails) {
+    for (const slot of recipientSlots) {
+      const entry = contact.recipients[slot.key] ?? { name: "", email: "" };
+      const slotErrors: Partial<Recipient> = {};
+      if (!entry.name.trim()) slotErrors.name = "Enter the recipient's name.";
+      if (!validEmail(entry.email.trim())) slotErrors.email = "Enter a valid email address.";
+      if (Object.keys(slotErrors).length > 0) recipientErrors[slot.key] = slotErrors;
+    }
+  }
+  const contactReady = Object.keys(contactErrors).length === 0 && Object.keys(recipientErrors).length === 0;
 
   function rotateKey() {
     const key = crypto.randomUUID();
@@ -217,6 +247,13 @@ export function CheckoutFlow() {
             email: contact.email.trim(),
             phone: contact.phone,
           },
+          recipients: contact.separateEmails
+            ? recipientSlots.map((slot) => ({
+                tierId: slot.tierId,
+                name: contact.recipients[slot.key]?.name.trim() ?? "",
+                email: contact.recipients[slot.key]?.email.trim() ?? "",
+              }))
+            : [],
         }),
       });
       if (result.total === 0 && result.confirmed) {
@@ -245,6 +282,8 @@ export function CheckoutFlow() {
 
   async function finishCheckout() {
     if (!acceptTerms || expired || pending) return;
+    setPending(true);
+    setPayError("");
     if (eventUpdates || nearbyEvents) {
       try {
         await api("/api/leads", {
@@ -255,7 +294,16 @@ export function CheckoutFlow() {
         // The reservation still stands if the mailing list does not save.
       }
     }
-    setStep("done");
+    try {
+      const { url } = await api<{ url: string }>("/api/checkout/pay", { method: "POST" });
+      setRedirecting(true);
+      window.location.assign(url);
+    } catch (payFailure) {
+      const text = payFailure instanceof Error ? payFailure.message : "Payment could not be started.";
+      setPayError(text);
+      if (text.includes("expired") || text.includes("Start again")) rotateKey();
+      setPending(false);
+    }
   }
 
   async function goBack() {
@@ -283,7 +331,7 @@ export function CheckoutFlow() {
   return (
     <div className="min-h-full bg-white text-ink">
       <header className="flex items-center justify-between px-5 pt-6 min-[1100px]:px-[72px] min-[1100px]:pt-12 min-[1100px]:pb-10">
-        <p className="text-xs leading-8 text-ink min-[1100px]:text-xl">Checkout</p>
+        <p className="text-base leading-8 text-ink min-[1100px]:text-xl">Checkout</p>
         <Link href="/" aria-label="Close checkout" className="opacity-70">
           <Image
             src="/close.svg"
@@ -309,7 +357,7 @@ export function CheckoutFlow() {
                     <span className="mx-1 h-px min-w-4 flex-1 bg-[#E5E7EB]" />
                   ) : null}
                   <span
-                    className={`flex shrink-0 items-center gap-1.5 text-[10px] font-normal whitespace-nowrap text-[#61646C] min-[1100px]:gap-2 min-[1100px]:text-base min-[1100px]:font-black min-[1100px]:tracking-[0.02em] ${reached ? "" : "opacity-50"}`}
+                    className={`flex shrink-0 items-center gap-1.5 text-sm font-normal whitespace-nowrap text-[#61646C] min-[1100px]:gap-2 min-[1100px]:text-base min-[1100px]:font-black min-[1100px]:tracking-[0.02em] ${reached ? "" : "opacity-50"}`}
                   >
                     {reached ? (
                       <Image
@@ -350,6 +398,17 @@ export function CheckoutFlow() {
             <ContactStep
               contact={contact}
               errors={showErrors ? contactErrors : {}}
+              recipientSlots={recipientSlots}
+              recipientErrors={showErrors ? recipientErrors : {}}
+              onRecipient={(key, patch) =>
+                setContact((current) => ({
+                  ...current,
+                  recipients: {
+                    ...current.recipients,
+                    [key]: { ...(current.recipients[key] ?? { name: "", email: "" }), ...patch },
+                  },
+                }))
+              }
               formError={holdError}
               secondsLeft={secondsLeft}
               expired={expired}
@@ -363,6 +422,7 @@ export function CheckoutFlow() {
             <PaymentStep
               secondsLeft={secondsLeft}
               expired={expired}
+              formError={payError}
               acceptTerms={acceptTerms}
               eventUpdates={eventUpdates}
               nearbyEvents={nearbyEvents}
@@ -375,15 +435,13 @@ export function CheckoutFlow() {
 
           {step === "done" ? (
             <div className="flex flex-col gap-6">
-              <h1 className={stepTitle}>{orderComplete ? "You're in" : "Payment is not live"}</h1>
-              <p className="max-w-xl text-[10px] leading-6 text-[#61646C] min-[1100px]:text-base">
-                {orderComplete
-                  ? `Your tickets are confirmed. We emailed them to ${contact.email.trim()}.`
-                  : "Card payment is not available yet, so this order is not complete. Your tickets stay reserved until the timer ends, then they go back on sale. Nothing was charged, and no ticket email was sent."}
+              <h1 className={stepTitle}>You&apos;re in</h1>
+              <p className="max-w-xl text-sm leading-6 text-[#61646C] min-[1100px]:text-base">
+                Your tickets are confirmed. We emailed them to {contact.email.trim()}.
               </p>
               <Link
                 href="/"
-                className="flex h-[52px] w-full items-center justify-center rounded-lg bg-[#3F3F3F] text-xs font-semibold text-white hover:bg-[#2c2c2c] min-[1100px]:h-auto min-[1100px]:w-fit min-[1100px]:bg-brand min-[1100px]:px-6 min-[1100px]:py-4 min-[1100px]:text-base min-[1100px]:font-normal min-[1100px]:hover:bg-[#e4572c]"
+                className="flex h-[52px] w-full items-center justify-center rounded-lg bg-[#3F3F3F] text-base font-semibold text-white hover:bg-[#2c2c2c] min-[1100px]:h-auto min-[1100px]:w-fit min-[1100px]:bg-brand min-[1100px]:px-6 min-[1100px]:py-4 min-[1100px]:font-normal min-[1100px]:hover:bg-[#e4572c]"
               >
                 Back to the event
               </Link>
@@ -415,8 +473,7 @@ export function CheckoutFlow() {
                   }
                 : step === "payment"
                   ? {
-                      label: "Checkout",
-                      mobileLabel: "Continue",
+                      label: redirecting ? "Opening Paystack…" : pending ? "Please wait…" : "Pay now",
                       enabled: acceptTerms && !expired && !pending,
                       onClick: () => void finishCheckout(),
                     }
@@ -465,7 +522,7 @@ function TicketStep({
           <article key={ticket.id} className="border-b border-line pb-7 min-[1100px]:pb-8">
             <div className="flex items-start justify-between gap-3 min-[1100px]:gap-6">
               <div className="min-w-0">
-                <h2 className="text-xs font-bold leading-6 text-ink min-[1100px]:text-lg min-[1100px]:font-black min-[1100px]:leading-[30px] min-[1100px]:tracking-[0.02em]">
+                <h2 className="text-base font-bold leading-6 text-ink min-[1100px]:text-lg min-[1100px]:font-black min-[1100px]:leading-[30px] min-[1100px]:tracking-[0.02em]">
                   {ticket.name}
                 </h2>
                 <p className="text-sm font-bold leading-6 text-brand min-[1100px]:mt-2 min-[1100px]:text-lg min-[1100px]:font-black min-[1100px]:leading-[30px] min-[1100px]:tracking-[0.02em]">
@@ -483,7 +540,7 @@ function TicketStep({
                     onChange={(event) =>
                       onChange(ticket.id, Number(event.target.value))
                     }
-                    className="h-[46px] w-full appearance-none rounded-lg border border-[#ECECED] bg-white pr-8 pl-4 text-xs font-extrabold text-black min-[1100px]:h-auto min-[1100px]:w-auto min-[1100px]:py-2.5 min-[1100px]:pr-10 min-[1100px]:pl-3 min-[1100px]:text-sm"
+                    className="h-[46px] w-full appearance-none rounded-lg border border-[#ECECED] bg-white pr-8 pl-4 text-[16px] font-extrabold text-black min-[1100px]:h-auto min-[1100px]:w-auto min-[1100px]:py-2.5 min-[1100px]:pr-10 min-[1100px]:pl-3"
                   >
                     {Array.from({ length: ticket.remaining + 1 }, (_, quantity) => (
                       <option key={quantity} value={quantity}>
@@ -500,13 +557,13 @@ function TicketStep({
                   />
                 </label>
                 {ticket.remaining === 1 ? (
-                  <p className="text-right text-[10px] text-[#61646C] min-[1100px]:text-sm min-[1100px]:leading-[18px]">
+                  <p className="text-right text-sm text-[#61646C] min-[1100px]:text-sm min-[1100px]:leading-[18px]">
                     1 ticket left
                   </p>
                 ) : null}
               </div>
             </div>
-            <p className="mt-3 text-[10px] leading-[22px] text-[#61646C] min-[1100px]:hidden">
+            <p className="mt-3 text-sm leading-[22px] text-[#61646C] min-[1100px]:hidden">
               {ticket.description}
             </p>
           </article>
@@ -524,7 +581,7 @@ function ReservationNote({
   expired: boolean;
 }) {
   return (
-    <p className="rounded-lg bg-[#FFEFEA] p-4 text-[10px] leading-6 text-[#61646C] min-[1100px]:text-base">
+    <p className="rounded-lg bg-[#FFEFEA] p-4 text-sm leading-6 text-[#61646C] min-[1100px]:text-base">
       {expired ? (
         "This reservation has expired. Go back and choose your tickets again."
       ) : (
@@ -559,7 +616,7 @@ function Field({
 }) {
   return (
     <div className="flex flex-col gap-2">
-      <label htmlFor={id} className="text-[10px] leading-[21px] text-[#111827] min-[1100px]:text-sm">
+      <label htmlFor={id} className="text-sm leading-[21px] text-[#111827] min-[1100px]:text-sm">
         <span className="text-brand">*</span> {label}
       </label>
       <input
@@ -571,7 +628,7 @@ function Field({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         aria-invalid={error ? true : undefined}
-        className="h-12 rounded-lg border border-[#CECFD2] px-4 text-[10px] text-black outline-none placeholder:text-muted focus:border-brand min-[1100px]:px-5 min-[1100px]:text-base"
+        className="h-12 rounded-lg border border-[#CECFD2] px-4 text-[16px] text-black outline-none placeholder:text-muted focus:border-brand min-[1100px]:px-5 min-[1100px]:text-base"
       />
       {error ? (
         <p className="text-sm text-brand" role="alert">
@@ -585,6 +642,9 @@ function Field({
 function ContactStep({
   contact,
   errors,
+  recipientSlots,
+  recipientErrors,
+  onRecipient,
   formError,
   secondsLeft,
   expired,
@@ -594,6 +654,9 @@ function ContactStep({
 }: {
   contact: Contact;
   errors: Partial<Record<keyof Contact, string>>;
+  recipientSlots: RecipientSlot[];
+  recipientErrors: RecipientErrors;
+  onRecipient: (key: string, patch: Partial<Recipient>) => void;
   formError: string;
   secondsLeft: number;
   expired: boolean;
@@ -658,11 +721,11 @@ function ContactStep({
             onChange={(confirmEmail) => onChange({ confirmEmail })}
           />
           <div className="flex flex-col gap-2">
-            <label htmlFor="phone" className="text-[10px] leading-[21px] text-[#111827] min-[1100px]:text-sm">
+            <label htmlFor="phone" className="text-sm leading-[21px] text-[#111827] min-[1100px]:text-sm">
               <span className="text-brand">*</span> Phone number
             </label>
             <div className="flex gap-2">
-              <span className="flex h-12 w-[100px] shrink-0 items-center justify-between rounded-lg border border-[#CECFD2] px-3.5 text-[10px] text-black min-[1100px]:w-auto min-[1100px]:justify-start min-[1100px]:gap-3 min-[1100px]:text-base min-[1100px]:text-[#111827]">
+              <span className="flex h-12 w-[100px] shrink-0 items-center justify-between rounded-lg border border-[#CECFD2] px-3.5 text-[16px] text-black min-[1100px]:w-auto min-[1100px]:justify-start min-[1100px]:gap-3 min-[1100px]:text-[#111827]">
                 +234
                 <Image src="/chevron.svg" alt="" width={8} height={4} />
               </span>
@@ -675,7 +738,7 @@ function ContactStep({
                 value={contact.phone}
                 onChange={(event) => onChange({ phone: event.target.value })}
                 aria-invalid={errors.phone ? true : undefined}
-                className="h-12 min-w-0 flex-1 rounded-lg border border-[#CECFD2] px-4 text-[10px] text-black outline-none placeholder:text-muted focus:border-brand min-[1100px]:px-5 min-[1100px]:text-base"
+                className="h-12 min-w-0 flex-1 rounded-lg border border-[#CECFD2] px-4 text-[16px] text-black outline-none placeholder:text-muted focus:border-brand min-[1100px]:px-5 min-[1100px]:text-base"
               />
             </div>
             {errors.phone ? (
@@ -687,10 +750,10 @@ function ContactStep({
         </div>
 
         <div className="flex flex-col gap-5">
-          <h2 className="text-xs font-bold leading-6 text-ink min-[1100px]:text-lg min-[1100px]:font-black min-[1100px]:leading-[30px] min-[1100px]:text-black">
+          <h2 className="text-base font-bold leading-6 text-ink min-[1100px]:text-lg min-[1100px]:font-black min-[1100px]:leading-[30px] min-[1100px]:text-black">
             Send ticket to different email addresses?
           </h2>
-          <div className="flex items-start gap-3 rounded-lg border border-line p-4 text-[10px] leading-6 text-[#61646C] min-[1100px]:relative min-[1100px]:block min-[1100px]:py-3 min-[1100px]:pl-12 min-[1100px]:text-base">
+          <div className="flex items-start gap-3 rounded-lg border border-line p-4 text-sm leading-6 text-[#61646C] min-[1100px]:relative min-[1100px]:block min-[1100px]:py-3 min-[1100px]:pl-12 min-[1100px]:text-base">
             <Image
               src="/info.svg"
               alt=""
@@ -698,7 +761,9 @@ function ContactStep({
               height={20}
               className="mt-0.5 size-4 shrink-0 min-[1100px]:absolute min-[1100px]:top-3.5 min-[1100px]:left-5 min-[1100px]:size-5"
             />
-            Tickets will only be sent to the email address you provide here.
+            {contact.separateEmails
+              ? "Each ticket goes straight to the person named below. You will still get the receipt and order summary."
+              : "All tickets will be sent to the email address you entered above."}
           </div>
           <div className="flex gap-5">
             <Radio
@@ -714,6 +779,45 @@ function ContactStep({
               onChange={() => onChange({ separateEmails: false })}
             />
           </div>
+          {contact.separateEmails ? (
+            <div className="flex flex-col gap-6">
+              {recipientSlots.map((slot) => {
+                const entry = contact.recipients[slot.key] ?? { name: "", email: "" };
+                const slotErrors = recipientErrors[slot.key] ?? {};
+                return (
+                  <fieldset key={slot.key} className="flex flex-col gap-4 rounded-lg border border-line p-4">
+                    <legend className="px-1 text-sm font-bold text-ink min-[1100px]:text-base">
+                      {slot.tierName}
+                      {slot.count > 1 ? ` · Ticket ${slot.index + 1} of ${slot.count}` : ""}
+                    </legend>
+                    <div className="flex flex-col gap-4 min-[1100px]:flex-row">
+                      <div className="flex-1">
+                        <Field
+                          id={`recipient-name-${slot.key}`}
+                          label="Recipient name"
+                          autoComplete="off"
+                          value={entry.name}
+                          error={slotErrors.name}
+                          onChange={(name) => onRecipient(slot.key, { name })}
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <Field
+                          id={`recipient-email-${slot.key}`}
+                          label="Recipient email"
+                          type="email"
+                          autoComplete="off"
+                          value={entry.email}
+                          error={slotErrors.email}
+                          onChange={(email) => onRecipient(slot.key, { email })}
+                        />
+                      </div>
+                    </div>
+                  </fieldset>
+                );
+              })}
+            </div>
+          ) : null}
         </div>
 
       </form>
@@ -733,7 +837,7 @@ function Radio({
   onChange: () => void;
 }) {
   return (
-    <label className="flex items-center gap-2 text-[10px] font-medium text-black min-[1100px]:text-base min-[1100px]:leading-6 min-[1100px]:text-[#111827]">
+    <label className="flex items-center gap-2 text-sm font-medium text-black min-[1100px]:text-base min-[1100px]:leading-6 min-[1100px]:text-[#111827]">
       <input
         type="radio"
         name={name}
@@ -765,7 +869,7 @@ function CheckRow({
   children: ReactNode;
 }) {
   return (
-    <label className="flex items-start gap-4 text-[10px] leading-[22px] text-[#111827] min-[1100px]:text-base">
+    <label className="flex items-start gap-4 text-sm leading-[22px] text-[#111827] min-[1100px]:text-base">
       <input
         type="checkbox"
         checked={checked}
@@ -798,6 +902,7 @@ function CheckRow({
 function PaymentStep({
   secondsLeft,
   expired,
+  formError,
   acceptTerms,
   eventUpdates,
   nearbyEvents,
@@ -808,6 +913,7 @@ function PaymentStep({
 }: {
   secondsLeft: number;
   expired: boolean;
+  formError: string;
   acceptTerms: boolean;
   eventUpdates: boolean;
   nearbyEvents: boolean;
@@ -831,14 +937,19 @@ function PaymentStep({
         <h1 className={stepTitle}>Payment Options</h1>
       </div>
       <ReservationNote secondsLeft={secondsLeft} expired={expired} />
+      {formError ? (
+        <p role="alert" className="text-sm font-bold text-brand">
+          {formError}
+        </p>
+      ) : null}
       <div className="border-b border-line pb-8 min-[1100px]:pb-14">
         <div className="flex gap-4">
           <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-brand">
             <Image src="/radio-check.svg" alt="" width={16} height={16} />
           </span>
           <div className="flex min-w-0 flex-1 flex-col gap-3">
-            <div className="flex flex-col gap-3 min-[1100px]:flex-row min-[1100px]:items-center min-[1100px]:justify-between">
-              <p className="text-xs leading-6 text-ink min-[1100px]:text-base min-[1100px]:text-[#111827]">
+            <div className="flex flex-col items-start gap-3 min-[1100px]:flex-row min-[1100px]:items-center min-[1100px]:justify-between">
+              <p className="text-base leading-6 text-ink min-[1100px]:text-[#111827]">
                 Pay with Card or Bank
               </p>
               <Image
@@ -846,21 +957,20 @@ function PaymentStep({
                 alt="Paystack"
                 width={114}
                 height={20}
-                className="h-5 w-auto"
+                className="h-5 w-[114px] shrink-0 object-contain"
               />
             </div>
-            <p className="text-xs leading-[22px] text-[#61646C] min-[1100px]:text-sm min-[1100px]:leading-[21px]">
+            <p className="text-sm leading-[22px] text-[#61646C] min-[1100px]:text-base min-[1100px]:leading-[21px]">
               Pay with Mastercard, Visa, or Verve or with bank transfer.
             </p>
-            <p className="rounded-lg bg-[#FAFAFA] p-4 text-[10px] leading-[22px] text-[#61646C] min-[1100px]:text-sm min-[1100px]:leading-[21px]">
-              Card payment is not live yet. Continuing does not charge a card or
-              sell this ticket. The seats stay reserved until the timer ends. An
-              admin confirms a paid order before any ticket email is sent.
+            <p className="rounded-lg bg-[#FAFAFA] p-4 text-sm leading-[22px] text-[#61646C] min-[1100px]:text-sm min-[1100px]:leading-[21px]">
+              You will be taken to Paystack&apos;s secure page to pay, then brought
+              back here. Your tickets are emailed as soon as the payment clears.
             </p>
           </div>
         </div>
       </div>
-      <p className="rounded-lg bg-line p-4 text-[10px] leading-6 text-[#61646C] min-[1100px]:text-base min-[1100px]:leading-[22px]">
+      <p className="rounded-lg bg-line p-4 text-sm leading-6 text-[#61646C] min-[1100px]:text-base min-[1100px]:leading-[22px]">
         You must accept the Cirqoo Terms and Conditions, Refund Policy and Privacy
         Policy before completing this purchase.
       </p>
@@ -929,32 +1039,32 @@ function Summary({
 }) {
   return (
     <aside className="flex w-full flex-col gap-5 min-[1100px]:w-[538px] min-[1100px]:shrink-0 min-[1100px]:gap-6">
-      <h2 className="text-xs font-bold leading-8 text-ink min-[1100px]:text-2xl min-[1100px]:font-black">
+      <h2 className="text-xl font-bold leading-8 text-ink min-[1100px]:text-2xl min-[1100px]:font-black">
         Summary
       </h2>
       <div className="flex flex-col gap-6 rounded-2xl border border-line p-5 min-[1100px]:block min-[1100px]:p-6">
-        <p className="text-center text-xs font-bold leading-7 text-ink min-[1100px]:text-xl min-[1100px]:font-black min-[1100px]:text-black">
+        <p className="text-center text-lg font-bold leading-7 text-ink min-[1100px]:text-xl min-[1100px]:font-black min-[1100px]:text-black">
           {eventTitle}
         </p>
         {lines.length === 0 ? (
-          <p className="text-center text-[10px] leading-6 text-[#85888E] min-[1100px]:mt-10 min-[1100px]:text-base min-[1100px]:leading-[30px]">
+          <p className="text-center text-sm leading-6 text-[#85888E] min-[1100px]:mt-10 min-[1100px]:text-base min-[1100px]:leading-[30px]">
             Please, choose a ticket type to continue
           </p>
         ) : (
           <div className="flex flex-col gap-6 min-[1100px]:mt-8 min-[1100px]:gap-0">
             {lines.map((line) => (
               <div key={line.id} className="flex items-start justify-between gap-3 pb-4 min-[1100px]:gap-6 min-[1100px]:pb-5">
-                <p className="text-[10px] leading-6 text-[#85888E] min-[1100px]:text-base min-[1100px]:leading-[30px]">
+                <p className="text-sm leading-6 text-[#85888E] min-[1100px]:text-base min-[1100px]:leading-[30px]">
                   {line.quantity} × {line.name}
                 </p>
-                <p className="text-[10px] leading-6 text-[#85888E] min-[1100px]:text-base min-[1100px]:leading-[30px]">
+                <p className="text-sm leading-6 text-[#85888E] min-[1100px]:text-base min-[1100px]:leading-[30px]">
                   {naira(line.total)}
                 </p>
               </div>
             ))}
             {showCode ? (
               <form onSubmit={onApplyCode} className="flex flex-col gap-2 border-t border-line py-4">
-                <label htmlFor="discount-code" className="text-[10px] leading-[21px] text-[#111827] min-[1100px]:text-sm">
+                <label htmlFor="discount-code" className="text-sm leading-[21px] text-[#111827] min-[1100px]:text-sm">
                   Discount code
                 </label>
                 <div className="flex gap-2">
@@ -964,13 +1074,13 @@ function Summary({
                     value={code}
                     autoComplete="off"
                     onChange={(event) => onCode(event.target.value.toUpperCase())}
-                    className="h-12 min-w-0 flex-1 rounded-lg border border-[#CECFD2] px-4 text-[10px] text-black outline-none placeholder:text-muted focus:border-brand min-[1100px]:text-base"
+                    className="h-12 min-w-0 flex-1 rounded-lg border border-[#CECFD2] px-4 text-[16px] text-black outline-none placeholder:text-muted focus:border-brand min-[1100px]:text-base"
                     placeholder="Code"
                   />
                   <button
                     type="submit"
                     disabled={!code.trim() || codePending}
-                    className="h-12 shrink-0 rounded-lg bg-[#3F3F3F] px-4 text-[10px] font-semibold text-white enabled:hover:bg-[#2c2c2c] disabled:bg-[#CECECE] min-[1100px]:bg-brand min-[1100px]:text-sm min-[1100px]:enabled:hover:bg-[#e4572c]"
+                    className="h-12 shrink-0 rounded-lg bg-[#3F3F3F] px-4 text-base font-semibold text-white enabled:hover:bg-[#2c2c2c] disabled:bg-[#CECECE] min-[1100px]:bg-brand min-[1100px]:enabled:hover:bg-[#e4572c]"
                   >
                     {codePending ? "Checking" : "Apply"}
                   </button>
@@ -981,10 +1091,10 @@ function Summary({
                   </p>
                 ) : null}
                 {appliedCode ? (
-                  <p className="text-[10px] leading-5 text-[#61646C] min-[1100px]:text-sm">{appliedCode} applied.</p>
+                  <p className="text-sm leading-5 text-[#61646C] min-[1100px]:text-sm">{appliedCode} applied.</p>
                 ) : null}
                 {codeStale ? (
-                  <p className="text-[10px] leading-5 text-[#61646C] min-[1100px]:text-sm">
+                  <p className="text-sm leading-5 text-[#61646C] min-[1100px]:text-sm">
                     Apply the code again for these tickets.
                   </p>
                 ) : null}
@@ -992,19 +1102,19 @@ function Summary({
             ) : null}
             {discount > 0 ? (
               <div className="flex items-center justify-between border-t border-line py-4 min-[1100px]:pt-5">
-                <p className="text-[10px] leading-6 text-[#85888E] min-[1100px]:text-base min-[1100px]:leading-[30px]">
+                <p className="text-sm leading-6 text-[#85888E] min-[1100px]:text-base min-[1100px]:leading-[30px]">
                   Discount
                 </p>
-                <p className="text-[10px] leading-[30px] text-[#85888E] min-[1100px]:text-base">
+                <p className="text-sm leading-[30px] text-[#85888E] min-[1100px]:text-base">
                   -{naira(discount)}
                 </p>
               </div>
             ) : null}
             <div className="flex items-center justify-between border-t border-line min-[1100px]:py-5">
-              <p className="text-xs font-black leading-6 text-ink min-[1100px]:text-base min-[1100px]:leading-[30px]">
+              <p className="text-base font-black leading-6 text-ink min-[1100px]:leading-[30px]">
                 Total
               </p>
-              <p className="text-xs font-black leading-[30px] text-ink min-[1100px]:text-base">
+              <p className="text-base font-black leading-[30px] text-ink">
                 {naira(total)}
               </p>
             </div>

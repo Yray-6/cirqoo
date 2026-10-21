@@ -1,7 +1,13 @@
 import { asDate, iso } from "@/server/time";
 import { getSql } from "@/server/db";
 import { HttpError, asString, clientIp, isRecord, readJson, validEmail } from "@/server/http";
-import { assertHoldRate, holdTickets, releaseHold, type HoldLine } from "@/server/inventory";
+import {
+  assertHoldRate,
+  holdTickets,
+  releaseHold,
+  type HoldLine,
+  type HoldRecipient,
+} from "@/server/inventory";
 import { holdCookie } from "@/server/session-token";
 import { apiGet, apiPost } from "@/server/route";
 
@@ -85,11 +91,19 @@ export const POST = apiPost(async (request) => {
     if (!isRecord(line)) return { tierId: "", quantity: 0 };
     return { tierId: asString(line.tierId), quantity: Number(line.quantity) };
   });
+  const rawRecipients = Array.isArray(body.recipients) ? body.recipients : [];
+  if (rawRecipients.length > 1000) throw new HttpError(400, "Choose fewer tickets.");
+  const recipients: HoldRecipient[] = rawRecipients.map((recipient) => {
+    if (!isRecord(recipient)) return { tierId: "", name: "", email: "" };
+    const email = asString(recipient.email).toLowerCase();
+    return { tierId: asString(recipient.tierId), name: asString(recipient.name), email: validEmail(email) ? email : "" };
+  });
   const result = await holdTickets({
     idempotencyKey: asString(body.idempotencyKey),
     lines,
     contact,
     code: asString(body.code),
+    recipients,
     eventUpdates: body.eventUpdates === true,
     nearbyEvents: body.nearbyEvents === true,
   });

@@ -119,11 +119,15 @@ export async function loadAdminState(user: CurrentUser) {
       total_kobo: number;
       held_until: Date | null;
       email_error: string | null;
+      payment_reference: string | null;
+      payment_error: string | null;
+      paid_kobo: number | null;
       ticket_count: number;
     }[]
   >`
     SELECT orders.id, orders.event_id, orders.first_name, orders.last_name, orders.email, orders.phone,
       orders.status, orders.total_kobo, orders.held_until, orders.email_error,
+      orders.payment_reference, orders.payment_error, orders.paid_kobo,
       COUNT(tickets.id)::int AS ticket_count
     FROM orders
     LEFT JOIN tickets ON tickets.order_id = orders.id
@@ -208,6 +212,9 @@ export async function loadAdminState(user: CurrentUser) {
       total: koboToNaira(order.total_kobo),
       heldUntil: iso(order.held_until),
       emailError: order.email_error,
+      paymentReference: order.payment_reference,
+      paymentError: order.payment_error,
+      paid: (order.paid_kobo ?? 0) > 0,
       ticketCount: order.ticket_count,
     })),
     staff: staffRows.map((member) => ({

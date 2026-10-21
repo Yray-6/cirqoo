@@ -24,6 +24,8 @@ export type HoldContact = {
   phone: string;
 };
 
+export type HoldRecipient = { tierId: string; name: string; email: string };
+
 export type HoldResult = {
   orderId: string;
   heldUntil: string | null;
@@ -73,6 +75,24 @@ function validLines(lines: HoldLine[]) {
       throw new HttpError(400, "Choose a ticket that is still on sale.");
     }
   }
+}
+
+/** Recipients are optional, but when given there must be exactly one per ticket in each tier. */
+function validRecipients(lines: HoldLine[], recipients: HoldRecipient[]) {
+  if (recipients.length === 0) return;
+  const wanted = new Map<string, number>();
+  for (const line of lines) wanted.set(line.tierId, (wanted.get(line.tierId) ?? 0) + line.quantity);
+  const given = new Map<string, number>();
+  for (const recipient of recipients) {
+    if (!recipient.name || recipient.name.length > 80 || !recipient.email || recipient.email.length > 200) {
+      throw new HttpError(400, "Add a name and email address for every ticket.");
+    }
+    given.set(recipient.tierId, (given.get(recipient.tierId) ?? 0) + 1);
+  }
+  for (const [tierId, count] of wanted) {
+    if (given.get(tierId) !== count) throw new HttpError(400, "Add a name and email address for every ticket.");
+  }
+  if (given.size !== wanted.size) throw new HttpError(400, "Add a name and email address for every ticket.");
 }
 
 function applyCut(subtotal: number, discount: DiscountRow) {
@@ -195,12 +215,14 @@ export async function holdTickets(input: {
   lines: HoldLine[];
   contact: HoldContact;
   code?: string;
+  recipients: HoldRecipient[];
   eventUpdates: boolean;
   nearbyEvents: boolean;
 }) {
   const key = input.idempotencyKey.trim();
   if (!/^[0-9a-f-]{36}$/i.test(key)) throw new HttpError(400, "Start checkout again.");
   validLines(input.lines);
+  validRecipients(input.lines, input.recipients);
   const sql = getSql();
   let outcome: HoldResult;
   try {
@@ -269,6 +291,15 @@ export async function holdTickets(input: {
         SET status = 'held', held_until = ${heldUntil.toISOString()}, order_id = ${orderId}
         WHERE id IN ${tx(picked)}
       `;
+      const positions = new Map<string, number>();
+      for (const recipient of input.recipients) {
+        const position = positions.get(recipient.tierId) ?? 0;
+        positions.set(recipient.tierId, position + 1);
+        await tx`
+          INSERT INTO order_recipients (id, order_id, tier_id, position, name, email)
+          VALUES (${randomUUID()}, ${orderId}, ${recipient.tierId}, ${position}, ${recipient.name}, ${recipient.email})
+        `;
+      }
       if (input.eventUpdates || input.nearbyEvents) {
         await tx`
           INSERT INTO leads (id, email, source)
@@ -329,7 +360,7 @@ export async function holdTickets(input: {
     if (!prior) throw new HttpError(409, "This checkout expired. Start again.");
     return prior;
   }
-  if (outcome.confirmed && !outcome.replay) await deliverTickets(outcome.orderId);
+  if (outcome.confirmed && !outcome.replay) await deliverOrder(outcome.orderId);
   return outcome;
 }
 
@@ -347,6 +378,49 @@ export async function releaseHold(orderId: string) {
       WHERE order_id = ${orderId} AND status = 'held'
     `;
   });
+}
+
+export type PaymentRecord = {
+  reference: string;
+  amountKobo: number;
+  channel: string;
+  paidAt: Date;
+};
+
+async function finalizeOrder(
+  tx: Tx,
+  orderId: string,
+  discountId: string | null,
+  payment: PaymentRecord | null,
+) {
+  if (discountId) {
+    const redeemed = await tx<{ id: string }[]>`
+      UPDATE discounts SET used = used + 1
+      WHERE id = ${discountId} AND used < usage_limit
+      RETURNING id
+    `;
+    // A paid order is never rejected over a discount; the money has already moved.
+    if (!redeemed[0] && !payment) throw new HttpError(409, "No uses left.");
+  }
+  const soldAt = new Date();
+  if (payment) {
+    await tx`
+      UPDATE orders
+      SET status = 'confirmed', confirmed_at = ${soldAt.toISOString()}, held_until = NULL,
+        payment_reference = ${payment.reference}, paid_at = ${payment.paidAt.toISOString()},
+        paid_kobo = ${payment.amountKobo}, payment_channel = ${payment.channel}, payment_error = NULL
+      WHERE id = ${orderId}
+    `;
+  } else {
+    await tx`
+      UPDATE orders SET status = 'confirmed', confirmed_at = ${soldAt.toISOString()}, held_until = NULL
+      WHERE id = ${orderId}
+    `;
+  }
+  await tx`
+    UPDATE tickets SET status = 'sold', held_until = NULL
+    WHERE order_id = ${orderId} AND status = 'held'
+  `;
 }
 
 export async function confirmOrder(orderId: string) {
@@ -368,27 +442,85 @@ export async function confirmOrder(orderId: string) {
       `;
       throw new HttpError(409, "This reservation expired.");
     }
-    if (order.discount_id) {
-      const redeemed = await tx<{ id: string }[]>`
-        UPDATE discounts SET used = used + 1
-        WHERE id = ${order.discount_id} AND used < usage_limit
-        RETURNING id
-      `;
-      if (!redeemed[0]) throw new HttpError(409, "No uses left.");
-    }
-    const soldAt = new Date();
-    await tx`
-      UPDATE orders SET status = 'confirmed', confirmed_at = ${soldAt.toISOString()}, held_until = NULL
-      WHERE id = ${orderId}
-    `;
-    await tx`
-      UPDATE tickets SET status = 'sold', held_until = NULL
-      WHERE order_id = ${orderId} AND status = 'held'
-    `;
+    await finalizeOrder(tx, orderId, order.discount_id, null);
     return { already: false as const };
   });
-  if (!outcome.already) await deliverTickets(orderId);
+  if (!outcome.already) await deliverOrder(orderId);
   return outcome;
+}
+
+const releasedAfterPayment = "Paid, but the reserved tickets were released and none are left. Refund or re-issue needed.";
+
+/**
+ * Confirms an order that Paystack reports as paid. A lapsed hold timer is not a
+ * reason to refuse the money: as long as the tickets are still attached they are
+ * sold; if they were already released, the same quantities are re-allocated from
+ * what is available, and only when that fails is the problem flagged for an admin.
+ */
+export async function finalizePaidOrder(orderId: string, payment: PaymentRecord, lines: HoldLine[]) {
+  const sql = getSql();
+  return sql.begin(async (tx) => {
+    const rows = await tx<
+      { id: string; status: string; event_id: string; discount_id: string | null }[]
+    >`SELECT id, status, event_id, discount_id FROM orders WHERE id = ${orderId} FOR UPDATE`;
+    const order = rows[0];
+    if (!order) throw new HttpError(404, "Order not found.");
+    if (order.status === "confirmed") return { already: true as const, problem: null };
+
+    const held = await tx<{ id: string }[]>`
+      SELECT id FROM tickets WHERE order_id = ${orderId} AND status = 'held' FOR UPDATE
+    `;
+    if (held.length === 0) {
+      const picked: string[] = [];
+      let short = lines.length === 0;
+      for (const line of lines) {
+        if (short) break;
+        const available = await tx<{ id: string }[]>`
+          SELECT id FROM tickets
+          WHERE tier_id = ${line.tierId} AND event_id = ${order.event_id} AND status = 'available'
+          ORDER BY number
+          FOR UPDATE SKIP LOCKED
+          LIMIT ${line.quantity}
+        `;
+        if (available.length < line.quantity) short = true;
+        else picked.push(...available.map((row) => row.id));
+      }
+      if (short) {
+        await tx`
+          UPDATE orders
+          SET status = 'expired', held_until = NULL,
+            payment_reference = ${payment.reference}, paid_at = ${payment.paidAt.toISOString()},
+            paid_kobo = ${payment.amountKobo}, payment_channel = ${payment.channel},
+            payment_error = ${releasedAfterPayment}
+          WHERE id = ${orderId}
+        `;
+        return { already: false as const, problem: releasedAfterPayment };
+      }
+      await tx`
+        UPDATE tickets
+        SET status = 'held', order_id = ${orderId}, held_until = now()
+        WHERE id IN ${tx(picked)}
+      `;
+    }
+    await finalizeOrder(tx, orderId, order.discount_id, payment);
+    return { already: false as const, problem: null };
+  });
+}
+
+/** Pushes the hold out so a buyer who is already on Paystack's page does not lose the seats mid-payment. */
+export async function extendHold(orderId: string, minutes: number) {
+  const sql = getSql();
+  const until = new Date(Date.now() + minutes * 60 * 1000).toISOString();
+  await sql.begin(async (tx) => {
+    await tx`
+      UPDATE orders SET held_until = ${until}
+      WHERE id = ${orderId} AND status = 'held' AND held_until < ${until}
+    `;
+    await tx`
+      UPDATE tickets SET held_until = ${until}
+      WHERE order_id = ${orderId} AND status = 'held' AND held_until < ${until}
+    `;
+  });
 }
 
 export async function resendOrder(orderId: string) {
@@ -410,6 +542,38 @@ async function deliverTickets(orderId: string) {
     await sql`
       UPDATE orders SET email_error = ${"The ticket email could not be sent."} WHERE id = ${orderId}
     `;
+  }
+}
+
+/** Tickets plus the purchaser's order summary (sent when there is a payment or when tickets went to other people). */
+async function deliverOrder(orderId: string) {
+  const { sendReceiptEmail } = await import("@/server/mail");
+  await deliverTickets(orderId);
+  try {
+    await sendReceiptEmail(orderId);
+  } catch {
+    console.error("receipt email failed");
+  }
+}
+
+/** Tickets, receipt, and the admin notice for a paid order. Only the ticket email is tracked on the order. */
+export async function deliverPaidOrder(orderId: string) {
+  const { sendAdminOrderNotice } = await import("@/server/mail");
+  await deliverOrder(orderId);
+  try {
+    await sendAdminOrderNotice(orderId);
+  } catch {
+    console.error("admin notice email failed");
+  }
+}
+
+/** Tells the admin about a payment that could not be turned into tickets. */
+export async function reportPaymentProblem(orderId: string) {
+  const { sendAdminOrderNotice } = await import("@/server/mail");
+  try {
+    await sendAdminOrderNotice(orderId);
+  } catch {
+    console.error("admin notice email failed");
   }
 }
 

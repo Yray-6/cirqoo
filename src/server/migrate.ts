@@ -91,6 +91,20 @@ const statements = [
   )`,
   `ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_id uuid REFERENCES discounts(id)`,
   `ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_kobo integer NOT NULL DEFAULT 0 CHECK (discount_kobo >= 0)`,
+  `ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_reference text UNIQUE`,
+  `ALTER TABLE orders ADD COLUMN IF NOT EXISTS paid_at timestamptz`,
+  `ALTER TABLE orders ADD COLUMN IF NOT EXISTS paid_kobo integer`,
+  `ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_channel text`,
+  `ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_error text`,
+  `CREATE TABLE IF NOT EXISTS order_recipients (
+    id uuid PRIMARY KEY,
+    order_id uuid NOT NULL REFERENCES orders(id),
+    tier_id uuid NOT NULL REFERENCES tiers(id),
+    position integer NOT NULL CHECK (position >= 0),
+    name text NOT NULL,
+    email text NOT NULL,
+    UNIQUE (order_id, tier_id, position)
+  )`,
 ];
 
 export async function migrate(sql: postgres.Sql) {
