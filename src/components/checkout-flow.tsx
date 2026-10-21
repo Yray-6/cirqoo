@@ -1,15 +1,41 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, useEffect, useMemo, useState, type ReactNode } from "react";
-import {
-  naira,
-  serviceFeeEach,
-  tickets,
-  type TicketId,
-} from "@/lib/tickets";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { FormEvent, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { api } from "@/lib/api";
+import { naira } from "@/lib/tickets";
+
+type CatalogTier = {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  remaining: number;
+};
+
+type Catalog = {
+  id: string;
+  title: string;
+  soldOut: boolean;
+  tiers: CatalogTier[];
+};
 
 type Step = "tickets" | "contact" | "payment" | "done";
+
+type Quote = {
+  code: string;
+  cartKey: string;
+  discount: number;
+  total: number;
+};
+
+type HoldResult = {
+  discount: number;
+  total: number;
+  confirmed: boolean;
+};
 
 type Contact = {
   firstName: string;
@@ -49,19 +75,52 @@ const stepTitle =
   "text-xs font-bold leading-8 text-ink min-[1100px]:text-2xl min-[1100px]:font-black";
 
 export function CheckoutFlow() {
+  const router = useRouter();
   const [step, setStep] = useState<Step>("tickets");
-  const [quantities, setQuantities] = useState<Record<TicketId, number>>({
-    "early-bird": 0,
-    solo: 0,
-  });
+  const [catalog, setCatalog] = useState<Catalog | null>(null);
+  const [catalogError, setCatalogError] = useState("");
+  const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [contact, setContact] = useState<Contact>(emptyContact);
   const [showErrors, setShowErrors] = useState(false);
-  const [feeNote, setFeeNote] = useState(false);
+  const [holdError, setHoldError] = useState("");
+  const [pending, setPending] = useState(false);
+  const [code, setCode] = useState("");
+  const [quote, setQuote] = useState<Quote | null>(null);
+  const [codeError, setCodeError] = useState("");
+  const [codePending, setCodePending] = useState(false);
+  const [orderComplete, setOrderComplete] = useState(false);
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [eventUpdates, setEventUpdates] = useState(false);
   const [nearbyEvents, setNearbyEvents] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(10 * 60);
   const [timerOn, setTimerOn] = useState(false);
+  const idempotencyKey = useRef("");
+
+  useEffect(() => {
+    const existing = sessionStorage.getItem("cirqoo-hold-key");
+    const key = existing ?? crypto.randomUUID();
+    if (!existing) sessionStorage.setItem("cirqoo-hold-key", key);
+    idempotencyKey.current = key;
+    let cancel = false;
+    api<{ event: Catalog | null }>("/api/public/catalog")
+      .then((payload) => {
+        if (cancel) return;
+        setCatalog(payload.event);
+        setQuantities((current) => {
+          const next = { ...current };
+          for (const tier of payload.event?.tiers ?? []) {
+            if (next[tier.id] === undefined) next[tier.id] = 0;
+          }
+          return next;
+        });
+      })
+      .catch((error: unknown) => {
+        if (!cancel) setCatalogError(error instanceof Error ? error.message : "Tickets did not load.");
+      });
+    return () => {
+      cancel = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!timerOn) return;
@@ -71,15 +130,17 @@ export function CheckoutFlow() {
     return () => window.clearInterval(id);
   }, [timerOn]);
 
-  const lines = tickets.flatMap((ticket) => {
-    const quantity = quantities[ticket.id];
+  const tiers = catalog?.tiers ?? [];
+  const lines = tiers.flatMap((ticket) => {
+    const quantity = quantities[ticket.id] ?? 0;
     if (quantity < 1) return [];
     return [{ ...ticket, quantity, total: ticket.price * quantity }];
   });
   const ticketTotal = lines.reduce((sum, line) => sum + line.total, 0);
   const ticketCount = lines.reduce((sum, line) => sum + line.quantity, 0);
-  const fees = ticketCount * serviceFeeEach;
-  const total = ticketTotal + fees;
+  const cartKey = lines.map((line) => `${line.id}:${line.quantity}`).join("|");
+  const applied = quote && quote.cartKey === cartKey ? quote : null;
+  const total = applied ? applied.total : ticketTotal;
   const expired = timerOn && secondsLeft === 0;
 
   const contactErrors = useMemo(() => {
@@ -97,38 +158,133 @@ export function CheckoutFlow() {
   }, [contact]);
   const contactReady = Object.keys(contactErrors).length === 0;
 
+  function rotateKey() {
+    const key = crypto.randomUUID();
+    sessionStorage.setItem("cirqoo-hold-key", key);
+    idempotencyKey.current = key;
+  }
+
   function goToContact() {
-    if (ticketCount < 1) return;
+    if (ticketCount < 1 || catalog?.soldOut) return;
     setTimerOn(true);
+    setSecondsLeft(10 * 60);
     setStep("contact");
   }
 
-  function submitContact(event: FormEvent<HTMLFormElement>) {
+  async function applyCode(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setShowErrors(true);
-    if (!contactReady || expired) return;
-    setStep("payment");
+    if (ticketCount < 1 || codePending) return;
+    setCodePending(true);
+    setCodeError("");
+    try {
+      const result = await api<{ discount: number; total: number }>("/api/checkout/discount", {
+        method: "POST",
+        body: JSON.stringify({
+          code,
+          lines: lines.map((line) => ({ tierId: line.id, quantity: line.quantity })),
+        }),
+      });
+      setQuote({
+        code: code.trim().toUpperCase(),
+        cartKey,
+        discount: result.discount,
+        total: result.total,
+      });
+    } catch (error) {
+      setQuote(null);
+      setCodeError(error instanceof Error ? error.message : "That code cannot be used.");
+    } finally {
+      setCodePending(false);
+    }
   }
 
-  function finishCheckout() {
-    if (!acceptTerms || expired) return;
+  async function submitContact(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setShowErrors(true);
+    if (!contactReady || expired || pending || !idempotencyKey.current) return;
+    setPending(true);
+    setHoldError("");
+    try {
+      const result = await api<HoldResult>("/api/checkout/hold", {
+        method: "POST",
+        body: JSON.stringify({
+          idempotencyKey: idempotencyKey.current,
+          lines: lines.map((line) => ({ tierId: line.id, quantity: line.quantity })),
+          code: applied?.code ?? "",
+          contact: {
+            firstName: contact.firstName.trim(),
+            lastName: contact.lastName.trim(),
+            email: contact.email.trim(),
+            phone: contact.phone,
+          },
+        }),
+      });
+      if (result.total === 0 && result.confirmed) {
+        setTimerOn(false);
+        setOrderComplete(true);
+        setStep("done");
+      } else if (result.confirmed || result.total === 0) {
+        setHoldError("Those tickets could not be reserved.");
+      } else {
+        if (applied) {
+          setQuote({ ...applied, discount: result.discount, total: result.total });
+        }
+        setOrderComplete(false);
+        setSecondsLeft(10 * 60);
+        setTimerOn(true);
+        setStep("payment");
+      }
+    } catch (holdFailure) {
+      const text = holdFailure instanceof Error ? holdFailure.message : "Those tickets could not be reserved.";
+      setHoldError(text);
+      if (text.includes("expired") || text.includes("Start again")) rotateKey();
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function finishCheckout() {
+    if (!acceptTerms || expired || pending) return;
+    if (eventUpdates || nearbyEvents) {
+      try {
+        await api("/api/leads", {
+          method: "POST",
+          body: JSON.stringify({ email: contact.email.trim(), source: "checkout" }),
+        });
+      } catch {
+        // The reservation still stands if the mailing list does not save.
+      }
+    }
     setStep("done");
   }
 
-  function goBack() {
+  async function goBack() {
+    if (step === "payment") {
+      setPending(true);
+      try {
+        await api("/api/checkout/hold", { method: "DELETE" });
+      } catch {
+        // The hold expires on its own if the release does not land.
+      } finally {
+        setPending(false);
+      }
+      rotateKey();
+      setTimerOn(false);
+      setSecondsLeft(10 * 60);
+      setStep("contact");
+      return;
+    }
     if (step === "contact") setStep("tickets");
-    else if (step === "payment") setStep("contact");
-    else window.location.href = "/";
+    else router.push("/");
   }
 
-  const activeIndex =
-    step === "done" ? 2 : stepOrder.indexOf(step);
+  const activeIndex = orderComplete ? 1 : step === "done" ? 2 : stepOrder.indexOf(step);
 
   return (
     <div className="min-h-full bg-white text-ink">
       <header className="flex items-center justify-between px-5 pt-6 min-[1100px]:px-[72px] min-[1100px]:pt-12 min-[1100px]:pb-10">
         <p className="text-xs leading-8 text-ink min-[1100px]:text-xl">Checkout</p>
-        <a href="/" aria-label="Close checkout" className="opacity-70">
+        <Link href="/" aria-label="Close checkout" className="opacity-70">
           <Image
             src="/close.svg"
             alt=""
@@ -136,7 +292,7 @@ export function CheckoutFlow() {
             height={32}
             className="size-3.5 min-[1100px]:size-8"
           />
-        </a>
+        </Link>
       </header>
 
       <main className="mt-8 flex flex-col gap-8 px-5 pb-12 min-[1100px]:mt-0 min-[1100px]:flex-row min-[1100px]:items-start min-[1100px]:justify-between min-[1100px]:gap-12 min-[1100px]:px-[72px] min-[1100px]:pb-24">
@@ -173,13 +329,20 @@ export function CheckoutFlow() {
             })}
           </ol>
 
+          {catalogError ? (
+            <p role="alert" className="text-sm font-bold text-brand">
+              {catalogError}
+            </p>
+          ) : null}
           {step === "tickets" ? (
             <TicketStep
+              tiers={tiers}
+              loading={catalog === null && !catalogError}
               quantities={quantities}
               onChange={(id, quantity) =>
                 setQuantities((current) => ({ ...current, [id]: quantity }))
               }
-              onBack={goBack}
+              onBack={() => void goBack()}
             />
           ) : null}
 
@@ -187,11 +350,12 @@ export function CheckoutFlow() {
             <ContactStep
               contact={contact}
               errors={showErrors ? contactErrors : {}}
+              formError={holdError}
               secondsLeft={secondsLeft}
               expired={expired}
               onChange={(patch) => setContact((current) => ({ ...current, ...patch }))}
-              onSubmit={submitContact}
-              onBack={goBack}
+              onSubmit={(event) => void submitContact(event)}
+              onBack={() => void goBack()}
             />
           ) : null}
 
@@ -205,49 +369,56 @@ export function CheckoutFlow() {
               onAcceptTerms={setAcceptTerms}
               onEventUpdates={setEventUpdates}
               onNearbyEvents={setNearbyEvents}
-              onBack={goBack}
+              onBack={() => void goBack()}
             />
           ) : null}
 
           {step === "done" ? (
             <div className="flex flex-col gap-6">
-              <h1 className={stepTitle}>You're all set</h1>
+              <h1 className={stepTitle}>{orderComplete ? "You're in" : "Payment is not live"}</h1>
               <p className="max-w-xl text-[10px] leading-6 text-[#61646C] min-[1100px]:text-base">
-                This preview does not charge a card. A confirmation for{" "}
-                {contact.email} would be emailed once a payment provider is
-                connected.
+                {orderComplete
+                  ? `Your tickets are confirmed. We emailed them to ${contact.email.trim()}.`
+                  : "Card payment is not available yet, so this order is not complete. Your tickets stay reserved until the timer ends, then they go back on sale. Nothing was charged, and no ticket email was sent."}
               </p>
-              <a
+              <Link
                 href="/"
                 className="flex h-[52px] w-full items-center justify-center rounded-lg bg-[#3F3F3F] text-xs font-semibold text-white hover:bg-[#2c2c2c] min-[1100px]:h-auto min-[1100px]:w-fit min-[1100px]:bg-brand min-[1100px]:px-6 min-[1100px]:py-4 min-[1100px]:text-base min-[1100px]:font-normal min-[1100px]:hover:bg-[#e4572c]"
               >
                 Back to the event
-              </a>
+              </Link>
             </div>
           ) : null}
         </section>
 
         <Summary
+          eventTitle={catalog?.title ?? "Cirqoo After Hours - Karaoke & Games"}
           lines={lines}
-          fees={fees}
+          discount={applied?.discount ?? 0}
           total={total}
-          feeNote={feeNote}
-          onToggleFee={() => setFeeNote((open) => !open)}
+          showCode={step === "tickets"}
+          code={code}
+          codeError={codeError}
+          codePending={codePending}
+          appliedCode={applied?.code ?? ""}
+          codeStale={quote !== null && quote.cartKey !== cartKey}
+          onCode={setCode}
+          onApplyCode={(event) => void applyCode(event)}
           action={
             step === "tickets" && ticketCount > 0
               ? { label: "Continue", enabled: true, onClick: goToContact }
               : step === "contact"
                 ? {
                     label: "Continue",
-                    enabled: contactReady && !expired,
+                    enabled: contactReady && !expired && !pending,
                     form: "contact-form",
                   }
                 : step === "payment"
                   ? {
                       label: "Checkout",
                       mobileLabel: "Continue",
-                      enabled: acceptTerms && !expired,
-                      onClick: finishCheckout,
+                      enabled: acceptTerms && !expired && !pending,
+                      onClick: () => void finishCheckout(),
                     }
                   : undefined
           }
@@ -258,12 +429,16 @@ export function CheckoutFlow() {
 }
 
 function TicketStep({
+  tiers,
+  loading,
   quantities,
   onChange,
   onBack,
 }: {
-  quantities: Record<TicketId, number>;
-  onChange: (id: TicketId, quantity: number) => void;
+  tiers: CatalogTier[];
+  loading: boolean;
+  quantities: Record<string, number>;
+  onChange: (id: string, quantity: number) => void;
   onBack: () => void;
 }) {
   return (
@@ -281,7 +456,12 @@ function TicketStep({
         <h1 className={stepTitle}>Choose Tickets</h1>
       </div>
       <div className="flex flex-col gap-7 min-[1100px]:gap-8 min-[1100px]:pt-2.5">
-        {tickets.map((ticket) => (
+        {loading ? (
+          <p className="text-sm text-muted">Loading tickets…</p>
+        ) : tiers.length === 0 ? (
+          <p className="text-sm text-muted">Tickets are not on sale right now.</p>
+        ) : null}
+        {tiers.map((ticket) => (
           <article key={ticket.id} className="border-b border-line pb-7 min-[1100px]:pb-8">
             <div className="flex items-start justify-between gap-3 min-[1100px]:gap-6">
               <div className="min-w-0">
@@ -299,7 +479,7 @@ function TicketStep({
                 <label className="relative block w-full">
                   <span className="sr-only">Quantity for {ticket.name}</span>
                   <select
-                    value={quantities[ticket.id]}
+                    value={quantities[ticket.id] ?? 0}
                     onChange={(event) =>
                       onChange(ticket.id, Number(event.target.value))
                     }
@@ -349,7 +529,7 @@ function ReservationNote({
         "This reservation has expired. Go back and choose your tickets again."
       ) : (
         <>
-          We're reserving this ticket for you. Complete your checkout within{" "}
+          We are reserving this ticket for you. Complete your checkout within{" "}
           <span className="font-extrabold text-brand min-[1100px]:text-[15px] min-[1100px]:leading-5">
             {clock(secondsLeft)}
           </span>{" "}
@@ -405,6 +585,7 @@ function Field({
 function ContactStep({
   contact,
   errors,
+  formError,
   secondsLeft,
   expired,
   onChange,
@@ -413,6 +594,7 @@ function ContactStep({
 }: {
   contact: Contact;
   errors: Partial<Record<keyof Contact, string>>;
+  formError: string;
   secondsLeft: number;
   expired: boolean;
   onChange: (patch: Partial<Contact>) => void;
@@ -434,6 +616,11 @@ function ContactStep({
         <h1 className={stepTitle}>Contact Information</h1>
       </div>
       <ReservationNote secondsLeft={secondsLeft} expired={expired} />
+      {formError ? (
+        <p role="alert" className="text-sm font-bold text-brand">
+          {formError}
+        </p>
+      ) : null}
       <form id="contact-form" onSubmit={onSubmit} noValidate className="flex flex-col gap-8 min-[1100px]:gap-10">
         <div className="flex flex-col gap-6">
           <Field
@@ -666,8 +853,9 @@ function PaymentStep({
               Pay with Mastercard, Visa, or Verve or with bank transfer.
             </p>
             <p className="rounded-lg bg-[#FAFAFA] p-4 text-[10px] leading-[22px] text-[#61646C] min-[1100px]:text-sm min-[1100px]:leading-[21px]">
-              Once your payment is confirmed, your ticket will be emailed to you
-              automatically within minutes.
+              Card payment is not live yet. Continuing does not charge a card or
+              sell this ticket. The seats stay reserved until the timer ends. An
+              admin confirms a paid order before any ticket email is sent.
             </p>
           </div>
         </div>
@@ -705,18 +893,32 @@ function PaymentStep({
 }
 
 function Summary({
+  eventTitle,
   lines,
-  fees,
+  discount,
   total,
-  feeNote,
-  onToggleFee,
+  showCode,
+  code,
+  codeError,
+  codePending,
+  appliedCode,
+  codeStale,
+  onCode,
+  onApplyCode,
   action,
 }: {
+  eventTitle: string;
   lines: Array<{ id: string; name: string; quantity: number; total: number }>;
-  fees: number;
+  discount: number;
   total: number;
-  feeNote: boolean;
-  onToggleFee: () => void;
+  showCode: boolean;
+  code: string;
+  codeError: string;
+  codePending: boolean;
+  appliedCode: string;
+  codeStale: boolean;
+  onCode: (value: string) => void;
+  onApplyCode: (event: FormEvent<HTMLFormElement>) => void;
   action?: {
     label: string;
     mobileLabel?: string;
@@ -732,7 +934,7 @@ function Summary({
       </h2>
       <div className="flex flex-col gap-6 rounded-2xl border border-line p-5 min-[1100px]:block min-[1100px]:p-6">
         <p className="text-center text-xs font-bold leading-7 text-ink min-[1100px]:text-xl min-[1100px]:font-black min-[1100px]:text-black">
-          Cirqoo After Hours - Karaoke & Games
+          {eventTitle}
         </p>
         {lines.length === 0 ? (
           <p className="text-center text-[10px] leading-6 text-[#85888E] min-[1100px]:mt-10 min-[1100px]:text-base min-[1100px]:leading-[30px]">
@@ -750,41 +952,55 @@ function Summary({
                 </p>
               </div>
             ))}
-            <div className="border-y border-line py-4 min-[1100px]:border-t min-[1100px]:border-b-0 min-[1100px]:pt-5 min-[1100px]:pb-0">
-              <div className="flex items-center justify-between pb-4 min-[1100px]:pb-5">
-                <p className="flex items-center gap-2 text-[10px] leading-6 text-[#85888E] min-[1100px]:text-base min-[1100px]:leading-[30px]">
-                  Service fees
+            {showCode ? (
+              <form onSubmit={onApplyCode} className="flex flex-col gap-2 border-t border-line py-4">
+                <label htmlFor="discount-code" className="text-[10px] leading-[21px] text-[#111827] min-[1100px]:text-sm">
+                  Discount code
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    id="discount-code"
+                    name="discount-code"
+                    value={code}
+                    autoComplete="off"
+                    onChange={(event) => onCode(event.target.value.toUpperCase())}
+                    className="h-12 min-w-0 flex-1 rounded-lg border border-[#CECFD2] px-4 text-[10px] text-black outline-none placeholder:text-muted focus:border-brand min-[1100px]:text-base"
+                    placeholder="Code"
+                  />
                   <button
-                    type="button"
-                    onClick={onToggleFee}
-                    aria-expanded={feeNote}
-                    aria-label="About service fees"
+                    type="submit"
+                    disabled={!code.trim() || codePending}
+                    className="h-12 shrink-0 rounded-lg bg-[#3F3F3F] px-4 text-[10px] font-semibold text-white enabled:hover:bg-[#2c2c2c] disabled:bg-[#CECECE] min-[1100px]:bg-brand min-[1100px]:text-sm min-[1100px]:enabled:hover:bg-[#e4572c]"
                   >
-                    <Image src="/info.svg" alt="" width={16} height={16} />
+                    {codePending ? "Checking" : "Apply"}
                   </button>
-                </p>
-                <p className="text-[10px] leading-[30px] text-[#85888E] min-[1100px]:text-base">
-                  {naira(fees)}
-                </p>
-              </div>
-              {feeNote ? (
-                <p className="pb-4 text-[10px] leading-5 text-[#61646C] min-[1100px]:text-sm">
-                  A {naira(serviceFeeEach)} service fee is added for each ticket.
-                </p>
-              ) : null}
-              <div className="flex items-center justify-between min-[1100px]:pb-5">
+                </div>
+                {codeError ? (
+                  <p role="alert" className="text-sm text-brand">
+                    {codeError}
+                  </p>
+                ) : null}
+                {appliedCode ? (
+                  <p className="text-[10px] leading-5 text-[#61646C] min-[1100px]:text-sm">{appliedCode} applied.</p>
+                ) : null}
+                {codeStale ? (
+                  <p className="text-[10px] leading-5 text-[#61646C] min-[1100px]:text-sm">
+                    Apply the code again for these tickets.
+                  </p>
+                ) : null}
+              </form>
+            ) : null}
+            {discount > 0 ? (
+              <div className="flex items-center justify-between border-t border-line py-4 min-[1100px]:pt-5">
                 <p className="text-[10px] leading-6 text-[#85888E] min-[1100px]:text-base min-[1100px]:leading-[30px]">
-                  Subtotal
+                  Discount
                 </p>
                 <p className="text-[10px] leading-[30px] text-[#85888E] min-[1100px]:text-base">
-                  {naira(total)}
+                  -{naira(discount)}
                 </p>
               </div>
-            </div>
-            <p className="rounded-lg border border-line bg-[#FAFAFA] px-4 py-4 text-center text-[10px] leading-[21px] text-[#61646C] min-[1100px]:text-sm">
-              Discount has been automatically calculated
-            </p>
-            <div className="flex items-center justify-between min-[1100px]:py-5">
+            ) : null}
+            <div className="flex items-center justify-between border-t border-line min-[1100px]:py-5">
               <p className="text-xs font-black leading-6 text-ink min-[1100px]:text-base min-[1100px]:leading-[30px]">
                 Total
               </p>

@@ -1,13 +1,14 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { api } from "@/lib/api";
 
 export function NewsletterForm() {
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const value = email.trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
@@ -15,8 +16,14 @@ export function NewsletterForm() {
       setDone(false);
       return;
     }
-    setError("");
-    setDone(true);
+    try {
+      await api("/api/leads", { method: "POST", body: JSON.stringify({ email: value }) });
+      setError("");
+      setDone(true);
+    } catch (submitError) {
+      setDone(false);
+      setError(submitError instanceof Error ? submitError.message : "Subscription did not go through.");
+    }
   }
 
   if (done) {

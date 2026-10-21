@@ -18,7 +18,7 @@ function readTicketCode(value: string) {
   return match?.[0] ?? value.trim();
 }
 
-export function TicketCamera({ onCode }: { onCode: (code: string) => void }) {
+export function TicketCamera({ onCode }: { onCode: (code: string) => void | Promise<void> }) {
   const onCodeRef = useRef(onCode);
   const [attempt, setAttempt] = useState(0);
   const [cameraState, setCameraState] = useState<"starting" | "live" | "error">("starting");
@@ -32,6 +32,8 @@ export function TicketCamera({ onCode }: { onCode: (code: string) => void }) {
     let cancelled = false;
     let scanner: Html5Qrcode | null = null;
     const busy = { current: false };
+    const suppress = { current: "" };
+    const misses = { current: 0 };
 
     async function open() {
       setCameraState("starting");
@@ -48,23 +50,34 @@ export function TicketCamera({ onCode }: { onCode: (code: string) => void }) {
         (decoded) => {
           const code = readTicketCode(decoded);
           if (!code || busy.current || !scanner) return;
+          if (code === suppress.current) {
+            misses.current = 0;
+            return;
+          }
           busy.current = true;
+          suppress.current = code;
+          misses.current = 0;
           try {
             scanner.pause(true);
           } catch {
             // The frame already finished as the camera was stopping.
           }
-          onCodeRef.current(code);
-          window.setTimeout(() => {
-            busy.current = false;
-            try {
-              scanner?.resume();
-            } catch {
-              // The page left before the next scan.
-            }
-          }, 1600);
+          void Promise.resolve(onCodeRef.current(code)).finally(() => {
+            window.setTimeout(() => {
+              busy.current = false;
+              try {
+                scanner?.resume();
+              } catch {
+                // The page left before the next scan.
+              }
+            }, 400);
+          });
         },
-        () => {},
+        () => {
+          if (!suppress.current || busy.current) return;
+          misses.current += 1;
+          if (misses.current >= 12) suppress.current = "";
+        },
       );
       if (cancelled) return;
       setCameraState("live");

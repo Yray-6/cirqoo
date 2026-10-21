@@ -2,37 +2,42 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from "react";
-import {
-  buyers,
-  inflowDays,
-  initialAnnouncements,
-  initialDiscounts,
-  initialEvents,
-  initialProfile,
-  initialTickets,
-  leads,
-  type AdminEvent,
-  type AdminProfile,
-  type AdminTicket,
-  type Announcement,
-  type DiscountCode,
-  type DiscountCut,
-  type EventDraft,
-  type TierDraft,
+import { api } from "@/lib/api";
+import type {
+  AdminEvent,
+  AdminOrder,
+  AdminProfile,
+  Announcement,
+  Buyer,
+  DiscountCode,
+  DiscountCut,
+  EventDraft,
+  InflowDay,
+  Lead,
+  StaffAccount,
+  UserRole,
 } from "@/lib/admin-mock";
 
-export type ScanResult =
-  | { type: "unknown" }
-  | { type: "unsold"; ticket: AdminTicket }
-  | { type: "already"; ticket: AdminTicket }
-  | { type: "used"; ticket: AdminTicket };
+type AdminState = {
+  profile: AdminProfile;
+  events: AdminEvent[];
+  discounts: DiscountCode[];
+  announcements: Announcement[];
+  buyers: Buyer[];
+  leads: Lead[];
+  inflowDays: InflowDay[];
+  orders: AdminOrder[];
+  staff: StaffAccount[];
+};
 
-export type DiscountDraft = {
+type DiscountDraft = {
   code: string;
   eventId: string;
   cut: DiscountCut;
@@ -41,298 +46,181 @@ export type DiscountDraft = {
   usageLimit: number;
 };
 
-type AdminStore = {
-  events: AdminEvent[];
-  tickets: AdminTicket[];
-  discounts: DiscountCode[];
-  announcements: Announcement[];
-  profile: AdminProfile;
-  buyers: typeof buyers;
-  leads: typeof leads;
-  inflowDays: typeof inflowDays;
-  createEvent: (draft: EventDraft) => void;
-  updateEvent: (id: string, draft: EventDraft) => string | null;
-  provisionTickets: (eventId: string, tierId: string, count: number) => string | null;
-  scan: (code: string) => ScanResult;
-  addDiscount: (draft: DiscountDraft) => string | null;
-  redeemDiscount: (id: string) => string | null;
-  addAnnouncement: (title: string, body: string) => void;
-  updateProfile: (name: string) => void;
+type AdminStore = AdminState & {
+  role: UserRole;
+  revision: number;
+  createEvent: (draft: EventDraft) => Promise<string | null>;
+  updateEvent: (id: string, draft: EventDraft) => Promise<string | null>;
+  provisionTickets: (eventId: string, tierId: string, count: number) => Promise<string | null>;
+  deleteTickets: (
+    eventId: string,
+    input: { code?: string; allUnsold?: boolean },
+  ) => Promise<{ error: string | null; deleted: number }>;
+  addDiscount: (draft: DiscountDraft) => Promise<string | null>;
+  redeemDiscount: (id: string) => Promise<string | null>;
+  addAnnouncement: (title: string, body: string) => Promise<void>;
+  updateProfile: (name: string) => Promise<string | null>;
+  changePassword: (currentPassword: string, nextPassword: string) => Promise<string | null>;
+  createStaff: (input: { name: string; email: string; password: string; role: UserRole }) => Promise<string | null>;
+  resetStaff: (id: string, password: string) => Promise<string | null>;
+  disableStaff: (id: string) => Promise<string | null>;
+  confirmOrder: (id: string) => Promise<string | null>;
+  resendOrder: (id: string) => Promise<string | null>;
 };
 
-const AdminStoreContext = createContext<AdminStore | null>(null);
+type AdminStoreContextValue = {
+  status: "loading" | "ready" | "error";
+  error: string;
+  store: AdminStore | null;
+};
 
-const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const AdminStoreContext = createContext<AdminStoreContextValue | null>(null);
 
-function newId() {
-  return crypto.randomUUID();
+async function message(task: () => Promise<void>, refresh: () => Promise<void>) {
+  try {
+    await task();
+    await refresh();
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : "Something went wrong.";
+  }
 }
 
-function newCode(used: Set<string>) {
-  let code = "";
-  do {
-    code = "CRQ-";
-    for (let index = 0; index < 6; index += 1) {
-      code += alphabet[Math.floor(Math.random() * alphabet.length)];
-    }
-  } while (used.has(code));
-  used.add(code);
-  return code;
-}
+export function AdminStoreProvider({
+  role,
+  children,
+}: {
+  role: UserRole;
+  children: ReactNode;
+}) {
+  const [state, setState] = useState<AdminState | null>(null);
+  const [revision, setRevision] = useState(0);
+  const [error, setError] = useState("");
 
-function blankTicket(
-  eventId: string,
-  tier: TierDraft & { id: string },
-  used: Set<string>,
-  number: number,
-): AdminTicket {
-  return {
-    number,
-    code: newCode(used),
-    eventId,
-    tierId: tier.id,
-    tierName: tier.name.trim(),
-    status: "unsold",
-  };
-}
+  const refresh = useCallback(async () => {
+    const next = await api<AdminState>("/api/admin/state");
+    setState(next);
+    setRevision((current) => current + 1);
+  }, []);
 
-function nextTicketNumber(rows: AdminTicket[], eventId: string) {
-  return rows
-    .filter((item) => item.eventId === eventId)
-    .reduce((max, item) => Math.max(max, item.number), 0);
-}
-
-export function AdminStoreProvider({ children }: { children: ReactNode }) {
-  const [events, setEvents] = useState(initialEvents);
-  const [tickets, setTickets] = useState(initialTickets);
-  const [discounts, setDiscounts] = useState(initialDiscounts);
-  const [announcements, setAnnouncements] = useState(initialAnnouncements);
-  const [profile, setProfile] = useState(initialProfile);
-
-  const store = useMemo<AdminStore>(() => {
-    return {
-      events,
-      tickets,
-      discounts,
-      announcements,
-      profile,
-      buyers,
-      leads,
-      inflowDays,
-      createEvent(draft) {
-        const id = newId();
-        const used = new Set(tickets.map((item) => item.code));
-        const tiers = draft.tiers.map((tier) => ({
-          id: newId(),
-          name: tier.name.trim(),
-          description: tier.description.trim(),
-          price: tier.price,
-          capacity: tier.capacity,
-        }));
-        let number = 0;
-        const created = tiers.flatMap((tier) =>
-          Array.from({ length: tier.capacity }, () => {
-            number += 1;
-            return blankTicket(id, tier, used, number);
-          }),
-        );
-        setEvents((current) => [
-          {
-            id,
-            title: draft.title.trim(),
-            description: draft.description.trim(),
-            venue: draft.venue.trim(),
-            startsAt: draft.startsAt,
-            endsAt: draft.endsAt,
-            status: draft.status,
-            tiers,
-          },
-          ...current,
-        ]);
-        setTickets((current) => [...created, ...current]);
-      },
-      updateEvent(id, draft) {
-        const event = events.find((item) => item.id === id);
-        if (!event) return "Event not found.";
-
-        const owned = tickets.filter((item) => item.eventId === id);
-        const removed = event.tiers.filter(
-          (tier) => !draft.tiers.some((item) => item.id === tier.id),
-        );
-        for (const tier of removed) {
-          const committed = owned.filter(
-            (item) => item.tierId === tier.id && item.status !== "unsold",
-          );
-          if (committed.length > 0) {
-            return `${tier.name} already has sold tickets, so it stays on the event.`;
-          }
-        }
-
-        for (const tier of draft.tiers) {
-          if (!tier.id) continue;
-          const committed = owned.filter(
-            (item) => item.tierId === tier.id && item.status !== "unsold",
-          );
-          if (tier.capacity < committed.length) {
-            return `${tier.name} already has ${committed.length} sold tickets.`;
-          }
-        }
-
-        const used = new Set(tickets.map((item) => item.code));
-        const nextTiers = draft.tiers.map((tier) => ({
-          id: tier.id ?? newId(),
-          name: tier.name.trim(),
-          description: tier.description.trim(),
-          price: tier.price,
-          capacity: tier.capacity,
-        }));
-        const kept: AdminTicket[] = [];
-        let number = nextTicketNumber(owned, id);
-
-        for (const tier of nextTiers) {
-          const existing = owned.filter((item) => item.tierId === tier.id);
-          const committed = existing
-            .filter((item) => item.status !== "unsold")
-            .map((item) => ({ ...item, tierName: tier.name }));
-          const unsold = existing
-            .filter((item) => item.status === "unsold")
-            .slice(0, Math.max(tier.capacity - committed.length, 0))
-            .map((item) => ({ ...item, tierName: tier.name }));
-          const missing = tier.capacity - committed.length - unsold.length;
-          const added = Array.from({ length: missing }, () => {
-            number += 1;
-            return blankTicket(id, tier, used, number);
-          });
-          kept.push(...committed, ...unsold, ...added);
-        }
-
-        setTickets((current) => [
-          ...current.filter((item) => item.eventId !== id),
-          ...kept,
-        ]);
-        setEvents((current) =>
-          current.map((item) =>
-            item.id === id
-              ? {
-                  ...item,
-                  title: draft.title.trim(),
-                  description: draft.description.trim(),
-                  venue: draft.venue.trim(),
-                  startsAt: draft.startsAt,
-                  endsAt: draft.endsAt,
-                  status: draft.status,
-                  tiers: nextTiers,
-                }
-              : item,
-          ),
-        );
-        return null;
-      },
-      provisionTickets(eventId, tierId, count) {
-        const event = events.find((item) => item.id === eventId);
-        const tier = event?.tiers.find((item) => item.id === tierId);
-        if (!event || !tier) return "Pick a ticket tier.";
-        if (!Number.isInteger(count) || count < 1 || count > 500) {
-          return "Add between 1 and 500 tickets.";
-        }
-        const used = new Set(tickets.map((item) => item.code));
-        let number = nextTicketNumber(tickets, eventId);
-        const added = Array.from({ length: count }, () => {
-          number += 1;
-          return blankTicket(eventId, tier, used, number);
-        });
-        setTickets((current) => [...current, ...added]);
-        setEvents((current) =>
-          current.map((item) =>
-            item.id === eventId
-              ? {
-                  ...item,
-                  tiers: item.tiers.map((itemTier) =>
-                    itemTier.id === tierId
-                      ? { ...itemTier, capacity: itemTier.capacity + count }
-                      : itemTier,
-                  ),
-                }
-              : item,
-          ),
-        );
-        return null;
-      },
-      scan(raw) {
-        const code = raw.trim().toUpperCase();
-        const ticket = tickets.find((item) => item.code === code);
-        if (!ticket) return { type: "unknown" };
-        if (ticket.status === "unsold") return { type: "unsold", ticket };
-        if (ticket.status === "scanned") return { type: "already", ticket };
-        const scannedAt = new Date().toISOString();
-        const next = { ...ticket, status: "scanned" as const, scannedAt };
-        setTickets((current) =>
-          current.map((item) => (item.code === code ? next : item)),
-        );
-        return { type: "used", ticket: next };
-      },
-      addDiscount(draft) {
-        const code = draft.code.trim().toUpperCase();
-        if (!/^[A-Z0-9-]{4,16}$/.test(code)) {
-          return "Use 4 to 16 letters or numbers.";
-        }
-        if (discounts.some((item) => item.code === code)) return "That code already exists.";
-        if (!events.some((item) => item.id === draft.eventId)) return "Pick an event.";
-        if (!Number.isInteger(draft.usageLimit) || draft.usageLimit < 1) {
-          return "Set how many times the code can be used.";
-        }
-        if (draft.cut === "percentage" && (!Number.isInteger(draft.percent) || draft.percent < 1 || draft.percent > 100)) {
-          return "Percentage cut is a whole number from 1 to 100.";
-        }
-        if (draft.cut === "fixed" && (!Number.isInteger(draft.amount) || draft.amount < 1)) {
-          return "Fixed amount is a whole naira value.";
-        }
-        setDiscounts((current) => [
-          {
-            id: newId(),
-            code,
-            eventId: draft.eventId,
-            cut: draft.cut,
-            percent: draft.cut === "percentage" ? draft.percent : 0,
-            amount: draft.cut === "fixed" ? draft.amount : 0,
-            usageLimit: draft.usageLimit,
-            used: 0,
-          },
-          ...current,
-        ]);
-        return null;
-      },
-      redeemDiscount(id) {
-        const discount = discounts.find((item) => item.id === id);
-        if (!discount) return "Code not found.";
-        if (discount.used >= discount.usageLimit) return "This code has no uses left.";
-        setDiscounts((current) =>
-          current.map((item) => (item.id === id ? { ...item, used: item.used + 1 } : item)),
-        );
-        return null;
-      },
-      addAnnouncement(title, body) {
-        setAnnouncements((current) => [
-          {
-            id: newId(),
-            title: title.trim(),
-            body: body.trim(),
-            createdAt: new Date().toISOString(),
-          },
-          ...current,
-        ]);
-      },
-      updateProfile(name) {
-        setProfile((current) => ({ ...current, name: name.trim() }));
-      },
+  useEffect(() => {
+    let cancel = false;
+    api<AdminState>("/api/admin/state")
+      .then((next) => {
+        if (cancel) return;
+        setState(next);
+        setRevision((current) => current + 1);
+      })
+      .catch((loadError: unknown) => {
+        if (cancel) return;
+        setError(loadError instanceof Error ? loadError.message : "The admin data did not load.");
+      });
+    return () => {
+      cancel = true;
     };
-  }, [announcements, discounts, events, profile, tickets]);
+  }, []);
 
-  return <AdminStoreContext.Provider value={store}>{children}</AdminStoreContext.Provider>;
+  const store = useMemo<AdminStore | null>(() => {
+    if (!state) return null;
+    return {
+      ...state,
+      role,
+      revision,
+      createEvent: (draft) =>
+        message(() => api("/api/admin/events", { method: "POST", body: JSON.stringify(draft) }), refresh),
+      updateEvent: (id, draft) =>
+        message(
+          () => api(`/api/admin/events/${id}`, { method: "POST", body: JSON.stringify(draft) }),
+          refresh,
+        ),
+      provisionTickets: (eventId, tierId, count) =>
+        message(
+          () =>
+            api("/api/admin/tickets/provision", {
+              method: "POST",
+              body: JSON.stringify({ eventId, tierId, count }),
+            }),
+          refresh,
+        ),
+      deleteTickets: async (eventId, input) => {
+        try {
+          const result = await api<{ deleted: number }>("/api/admin/tickets/delete", {
+            method: "POST",
+            body: JSON.stringify({ eventId, ...input }),
+          });
+          await refresh();
+          return { error: null, deleted: result.deleted };
+        } catch (error) {
+          return {
+            error: error instanceof Error ? error.message : "Something went wrong.",
+            deleted: 0,
+          };
+        }
+      },
+      addDiscount: (draft) =>
+        message(() => api("/api/admin/discounts", { method: "POST", body: JSON.stringify(draft) }), refresh),
+      redeemDiscount: (id) =>
+        message(() => api(`/api/admin/discounts/${id}/redeem`, { method: "POST" }), refresh),
+      addAnnouncement: async (title, body) => {
+        await api("/api/admin/announcements", {
+          method: "POST",
+          body: JSON.stringify({ title, body }),
+        });
+        await refresh();
+      },
+      updateProfile: (name) =>
+        message(() => api("/api/admin/profile", { method: "POST", body: JSON.stringify({ name }) }), refresh),
+      changePassword: (currentPassword, nextPassword) =>
+        message(
+          () =>
+            api("/api/admin/profile/password", {
+              method: "POST",
+              body: JSON.stringify({ currentPassword, nextPassword }),
+            }),
+          refresh,
+        ),
+      createStaff: (input) =>
+        message(() => api("/api/admin/staff", { method: "POST", body: JSON.stringify(input) }), refresh),
+      resetStaff: (id, password) =>
+        message(
+          () =>
+            api(`/api/admin/staff/${id}`, {
+              method: "POST",
+              body: JSON.stringify({ action: "reset", password }),
+            }),
+          refresh,
+        ),
+      disableStaff: (id) =>
+        message(
+          () =>
+            api(`/api/admin/staff/${id}`, {
+              method: "POST",
+              body: JSON.stringify({ action: "disable" }),
+            }),
+          refresh,
+        ),
+      confirmOrder: (id) =>
+        message(() => api(`/api/admin/orders/${id}/confirm`, { method: "POST" }), refresh),
+      resendOrder: (id) =>
+        message(() => api(`/api/admin/orders/${id}/resend`, { method: "POST" }), refresh),
+    };
+  }, [refresh, revision, role, state]);
+
+  const status = error ? "error" : store ? "ready" : "loading";
+
+  return (
+    <AdminStoreContext.Provider value={{ status, error, store }}>{children}</AdminStoreContext.Provider>
+  );
+}
+
+export function useAdminStatus() {
+  const value = useContext(AdminStoreContext);
+  if (!value) throw new Error("Admin store is missing.");
+  return { status: value.status, error: value.error };
 }
 
 export function useAdminStore() {
-  const store = useContext(AdminStoreContext);
-  if (!store) throw new Error("Admin store is missing.");
-  return store;
+  const value = useContext(AdminStoreContext);
+  if (!value?.store) throw new Error("Admin store is missing.");
+  return value.store;
 }

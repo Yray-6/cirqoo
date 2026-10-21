@@ -4,16 +4,32 @@ import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Wordmark } from "@/components/wordmark";
 import { fieldClass, primaryButtonClass } from "@/components/admin/ui";
+import { api } from "@/lib/api";
 
 export function LoginForm() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!email.trim() || !password) return;
-    router.push("/admin");
+    setPending(true);
+    setError("");
+    try {
+      const result = await api<{ role: "admin" | "staff"; mustChangePassword: boolean }>(
+        "/api/admin/login",
+        { method: "POST", body: JSON.stringify({ email, password }) },
+      );
+      if (result.mustChangePassword) router.push("/admin/profile");
+      else if (result.role === "staff") router.push("/admin/scan");
+      else router.push("/admin");
+      router.refresh();
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : "Sign-in failed.");
+      setPending(false);
+    }
   }
 
   return (
@@ -49,8 +65,13 @@ export function LoginForm() {
             className={fieldClass}
           />
         </label>
-        <button type="submit" className={`${primaryButtonClass} mt-6 w-full`}>
-          Sign in
+        {error ? (
+          <p role="alert" className="mt-4 text-sm font-bold text-brand">
+            {error}
+          </p>
+        ) : null}
+        <button type="submit" disabled={pending} className={`${primaryButtonClass} mt-6 w-full`}>
+          {pending ? "Signing in…" : "Sign in"}
         </button>
       </form>
     </main>

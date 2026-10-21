@@ -11,6 +11,8 @@ import {
   type EventStatus,
 } from "@/lib/admin-mock";
 import { useAdminStore } from "@/components/admin/admin-store";
+import { useNavPending } from "@/components/admin/nav-pending";
+import { useSuccess } from "@/components/admin/success-modal";
 import {
   Field,
   PageHeading,
@@ -52,6 +54,8 @@ function emptyRow(): TierRow {
 export function EventForm({ eventId }: { eventId?: string }) {
   const router = useRouter();
   const store = useAdminStore();
+  const showSuccess = useSuccess();
+  const { expect } = useNavPending();
   const existing = eventId ? store.events.find((event) => event.id === eventId) : undefined;
   const [title, setTitle] = useState(existing?.title ?? "");
   const [description, setDescription] = useState(existing?.description ?? "");
@@ -85,7 +89,7 @@ export function EventForm({ eventId }: { eventId?: string }) {
     );
   }
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!title.trim() || !venue.trim()) {
       setError("Add a title and a venue.");
@@ -136,14 +140,21 @@ export function EventForm({ eventId }: { eventId?: string }) {
     };
 
     if (eventId) {
-      const message = store.updateEvent(eventId, draft);
+      const message = await store.updateEvent(eventId, draft);
       if (message) {
         setError(message);
         return;
       }
+      await showSuccess("Event updated", "Your changes are saved.");
     } else {
-      store.createEvent(draft);
+      const message = await store.createEvent(draft);
+      if (message) {
+        setError(message);
+        return;
+      }
+      await showSuccess("Event created", "The event is on your events list.");
     }
+    expect("/admin/events");
     router.push("/admin/events");
   }
 

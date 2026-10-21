@@ -33,7 +33,7 @@ const venue =
   "Halo Lagos (Gothic Restaurant), 11b Hakeem Dickson Link Rd, Lekki";
 const mapLink = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(venue)}`;
 
-export function EventPage() {
+export function EventPage({ soldOut = false }: { soldOut?: boolean }) {
   return (
     <main className="px-5 pt-3 pb-12 min-[1100px]:px-[72px] min-[1100px]:pt-2 min-[1100px]:pb-20">
       <nav
@@ -67,13 +67,19 @@ export function EventPage() {
               className="hidden h-auto w-full min-[1100px]:block"
             />
           </div>
-          <a
-            id="get-ticket"
-            href="/checkout"
-            className="order-2 flex h-12 items-center justify-center rounded-lg bg-[#3F3F3F] text-[10px] font-semibold text-white hover:bg-[#2c2c2c] min-[1100px]:order-none min-[1100px]:h-auto min-[1100px]:bg-brand min-[1100px]:px-6 min-[1100px]:py-6 min-[1100px]:text-base min-[1100px]:font-normal min-[1100px]:leading-5 min-[1100px]:hover:bg-[#e4572c]"
-          >
-            Get a Ticket
-          </a>
+          {soldOut ? (
+            <span className="order-2 flex h-12 items-center justify-center rounded-lg bg-[#CECECE] text-[10px] font-semibold text-white min-[1100px]:order-none min-[1100px]:h-auto min-[1100px]:px-6 min-[1100px]:py-6 min-[1100px]:text-base min-[1100px]:font-normal min-[1100px]:leading-5">
+              Sold out
+            </span>
+          ) : (
+            <a
+              id="get-ticket"
+              href="/checkout"
+              className="order-2 flex h-12 items-center justify-center rounded-lg bg-[#3F3F3F] text-[10px] font-semibold text-white hover:bg-[#2c2c2c] min-[1100px]:order-none min-[1100px]:h-auto min-[1100px]:bg-brand min-[1100px]:px-6 min-[1100px]:py-6 min-[1100px]:text-base min-[1100px]:font-normal min-[1100px]:leading-5 min-[1100px]:hover:bg-[#e4572c]"
+            >
+              Get a Ticket
+            </a>
+          )}
           <section className="order-4 flex items-center justify-between gap-4 border-b-2 border-line py-2.5 min-[1100px]:order-none min-[1100px]:flex-col min-[1100px]:items-stretch min-[1100px]:py-0 min-[1100px]:pb-10">
             <h2 className="text-[10px] font-black leading-6 text-ink min-[1100px]:text-base min-[1100px]:text-black">
               Hosted by
