@@ -28,6 +28,10 @@ export function paystackSecretKey() {
   return process.env.PAYSTACK_SECRET_KEY?.trim() ?? "";
 }
 
+export function cronSecret() {
+  return process.env.CRON_SECRET?.trim() ?? "";
+}
+
 export function poolMax() {
   if (process.env.VERCEL || databaseUrl().includes("-pooler")) return 1;
   return 10;

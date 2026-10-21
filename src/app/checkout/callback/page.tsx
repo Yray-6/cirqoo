@@ -5,6 +5,7 @@ import { PaymentResult, PaymentResultShell } from "@/components/payment-result";
 export const metadata: Metadata = {
   title: "Payment - Cirqoo After Hours",
   description: "Confirming your payment for Cirqoo After Hours - Karaoke & Games.",
+  robots: { index: false, follow: false },
 };
 
 export default function PaymentCallbackPage() {

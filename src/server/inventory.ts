@@ -206,17 +206,32 @@ export async function quoteCheckout(input: { code: string; lines: HoldLine[] }) 
 }
 
 export async function releaseExpired(tx: Tx) {
-  await tx`
+  const rows = await tx<{ orders: number; tickets: number }[]>`
     WITH expired AS (
       UPDATE orders
       SET status = 'expired'
       WHERE status = 'held' AND held_until <= now()
       RETURNING id
+    ),
+    freed AS (
+      UPDATE tickets
+      SET status = 'available', held_until = NULL, order_id = NULL
+      WHERE status = 'held' AND order_id IN (SELECT id FROM expired)
+      RETURNING id
     )
-    UPDATE tickets
-    SET status = 'available', held_until = NULL, order_id = NULL
-    WHERE status = 'held' AND order_id IN (SELECT id FROM expired)
+    SELECT
+      (SELECT count(*)::int FROM expired) AS orders,
+      (SELECT count(*)::int FROM freed) AS tickets
   `;
+  return {
+    orders: Number(rows[0]?.orders ?? 0),
+    tickets: Number(rows[0]?.tickets ?? 0),
+  };
+}
+
+export async function sweepExpiredHolds() {
+  const sql = getSql();
+  return sql.begin((tx) => releaseExpired(tx));
 }
 
 export async function holdTickets(input: {
