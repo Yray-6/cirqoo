@@ -26,10 +26,10 @@ export const metadata: Metadata = {
     siteName: "Cirqoo",
     images: [
       {
-        url: "/flyer.png",
-        width: 960,
-        height: 1201,
-        alt: "Cirqoo After Hours flyer. Karaoke and games at Halo Lagos, Lekki on Friday, November 6, 2026.",
+        url: "/flyer-mobile.png",
+        width: 696,
+        height: 870,
+        alt: "Cirqoo After Hours flyer. Ticket price ₦15k, Friday, November 6th, 2026 at Halo Lagos, Lekki.",
       },
     ],
   },
