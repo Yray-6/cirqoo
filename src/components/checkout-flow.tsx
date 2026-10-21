@@ -194,8 +194,39 @@ export function CheckoutFlow() {
     idempotencyKey.current = key;
   }
 
-  function goToContact() {
-    if (ticketCount < 1 || catalog?.soldOut) return;
+  async function requestQuote(raw: string) {
+    const typed = raw.trim().toUpperCase();
+    const result = await api<{ discount: number; total: number }>("/api/checkout/discount", {
+      method: "POST",
+      body: JSON.stringify({
+        code: typed,
+        lines: lines.map((line) => ({ tierId: line.id, quantity: line.quantity })),
+      }),
+    });
+    const next = { code: typed, cartKey, discount: result.discount, total: result.total };
+    setQuote(next);
+    return next;
+  }
+
+  async function goToContact() {
+    if (ticketCount < 1 || catalog?.soldOut || codePending) return;
+    const typed = code.trim().toUpperCase();
+    if (typed && applied?.code !== typed) {
+      setCodePending(true);
+      setCodeError("");
+      try {
+        await requestQuote(typed);
+      } catch (error) {
+        setQuote(null);
+        setCodeError(error instanceof Error ? error.message : "That code cannot be used.");
+        return;
+      } finally {
+        setCodePending(false);
+      }
+    } else if (!typed) {
+      setQuote(null);
+      setCodeError("");
+    }
     setTimerOn(true);
     setSecondsLeft(10 * 60);
     setStep("contact");
@@ -207,19 +238,7 @@ export function CheckoutFlow() {
     setCodePending(true);
     setCodeError("");
     try {
-      const result = await api<{ discount: number; total: number }>("/api/checkout/discount", {
-        method: "POST",
-        body: JSON.stringify({
-          code,
-          lines: lines.map((line) => ({ tierId: line.id, quantity: line.quantity })),
-        }),
-      });
-      setQuote({
-        code: code.trim().toUpperCase(),
-        cartKey,
-        discount: result.discount,
-        total: result.total,
-      });
+      await requestQuote(code);
     } catch (error) {
       setQuote(null);
       setCodeError(error instanceof Error ? error.message : "That code cannot be used.");
@@ -263,9 +282,12 @@ export function CheckoutFlow() {
       } else if (result.confirmed || result.total === 0) {
         setHoldError("Those tickets could not be reserved.");
       } else {
-        if (applied) {
-          setQuote({ ...applied, discount: result.discount, total: result.total });
-        }
+        setQuote({
+          code: applied?.code ?? "",
+          cartKey,
+          discount: result.discount,
+          total: result.total,
+        });
         setOrderComplete(false);
         setSecondsLeft(10 * 60);
         setTimerOn(true);
@@ -464,7 +486,11 @@ export function CheckoutFlow() {
           onApplyCode={(event) => void applyCode(event)}
           action={
             step === "tickets" && ticketCount > 0
-              ? { label: "Continue", enabled: true, onClick: goToContact }
+              ? {
+                  label: codePending ? "Checking…" : "Continue",
+                  enabled: !codePending,
+                  onClick: () => void goToContact(),
+                }
               : step === "contact"
                 ? {
                     label: "Continue",
@@ -1099,6 +1125,10 @@ function Summary({
                   </p>
                 ) : null}
               </form>
+            ) : appliedCode ? (
+              <p className="border-t border-line pt-4 text-sm leading-5 text-[#61646C] min-[1100px]:text-sm">
+                {appliedCode} applied.
+              </p>
             ) : null}
             {discount > 0 ? (
               <div className="flex items-center justify-between border-t border-line py-4 min-[1100px]:pt-5">

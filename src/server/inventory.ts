@@ -77,6 +77,15 @@ function validLines(lines: HoldLine[]) {
   }
 }
 
+function selectionKey(lines: HoldLine[]) {
+  const counts = new Map<string, number>();
+  for (const line of lines) counts.set(line.tierId, (counts.get(line.tierId) ?? 0) + line.quantity);
+  return [...counts.entries()]
+    .sort((left, right) => (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0))
+    .map(([tierId, quantity]) => `${tierId}:${quantity}`)
+    .join("|");
+}
+
 /** Recipients are optional, but when given there must be exactly one per ticket in each tier. */
 function validRecipients(lines: HoldLine[], recipients: HoldRecipient[]) {
   if (recipients.length === 0) return;
@@ -233,73 +242,145 @@ export async function holdTickets(input: {
           id: string;
           status: string;
           held_until: Date | string | null;
+          discount_id: string | null;
           discount_kobo: number;
           total_kobo: number;
         }[]
-      >`SELECT id, status, held_until, discount_kobo, total_kobo FROM orders WHERE idempotency_key = ${key}`;
-      const prior = existing[0] ? holdView(existing[0], true) : null;
-      if (prior) return prior;
-      if (existing[0]) throw new HttpError(409, "This checkout expired. Start again.");
+      >`SELECT id, status, held_until, discount_id, discount_kobo, total_kobo FROM orders WHERE idempotency_key = ${key} FOR UPDATE`;
+      const row = existing[0];
+      if (row?.status === "confirmed") {
+        const prior = holdView(row, true);
+        if (prior) return prior;
+      }
+      if (row && !holdView(row, true)) throw new HttpError(409, "This checkout expired. Start again.");
 
       const event = await publishedEvent(tx);
       const tierRows = await tx<TierRow[]>`
         SELECT id, name, price_kobo, capacity FROM tiers WHERE event_id = ${event.id} ORDER BY sort_order
       `;
       const tiers = new Map(tierRows.map((tier) => [tier.id, tier]));
-      let ticketCount = 0;
-      let subtotal = 0;
-      const picked: string[] = [];
+      const discount = input.code ? await readDiscount(tx, event.id, input.code, true) : null;
 
-      for (const line of input.lines) {
-        const tier = tiers.get(line.tierId);
-        if (!tier) throw new HttpError(400, "Choose a ticket that is still on sale.");
-        const rows = await tx<{ id: string }[]>`
-          SELECT id FROM tickets
-          WHERE tier_id = ${tier.id} AND status = 'available'
-          ORDER BY number
-          FOR UPDATE SKIP LOCKED
-          LIMIT ${line.quantity}
-        `;
-        if (rows.length < line.quantity) {
-          throw new HttpError(409, `Only ${rows.length} ${tier.name} tickets are left.`);
+      async function takeTickets() {
+        const picked: string[] = [];
+        let ticketCount = 0;
+        let subtotal = 0;
+        for (const line of input.lines) {
+          const tier = tiers.get(line.tierId);
+          if (!tier) throw new HttpError(400, "Choose a ticket that is still on sale.");
+          const rows = await tx<{ id: string }[]>`
+            SELECT id FROM tickets
+            WHERE tier_id = ${tier.id} AND status = 'available'
+            ORDER BY number
+            FOR UPDATE SKIP LOCKED
+            LIMIT ${line.quantity}
+          `;
+          if (rows.length < line.quantity) {
+            throw new HttpError(409, `Only ${rows.length} ${tier.name} tickets are left.`);
+          }
+          picked.push(...rows.map((ticket) => ticket.id));
+          ticketCount += line.quantity;
+          subtotal += tier.price_kobo * line.quantity;
         }
-        picked.push(...rows.map((row) => row.id));
-        ticketCount += line.quantity;
-        subtotal += tier.price_kobo * line.quantity;
+        if (ticketCount < 1) throw new HttpError(400, "Choose a ticket to continue.");
+        return { picked, subtotal };
       }
 
-      if (ticketCount < 1) throw new HttpError(400, "Choose a ticket to continue.");
-      const discount = input.code ? await readDiscount(tx, event.id, input.code, true) : null;
+      async function writeRecipients(orderId: string) {
+        await tx`DELETE FROM order_recipients WHERE order_id = ${orderId}`;
+        const positions = new Map<string, number>();
+        for (const recipient of input.recipients) {
+          const position = positions.get(recipient.tierId) ?? 0;
+          positions.set(recipient.tierId, position + 1);
+          await tx`
+            INSERT INTO order_recipients (id, order_id, tier_id, position, name, email)
+            VALUES (${randomUUID()}, ${orderId}, ${recipient.tierId}, ${position}, ${recipient.name}, ${recipient.email})
+          `;
+        }
+      }
+
+      const heldUntil = new Date(Date.now() + holdMs);
+      const orderId = row?.id ?? randomUUID();
+      let subtotal = 0;
+      let picked: string[] | null = null;
+
+      if (row) {
+        const heldLines = await tx<{ tier_id: string; quantity: number }[]>`
+          SELECT tier_id, COUNT(*)::int AS quantity
+          FROM tickets
+          WHERE order_id = ${row.id} AND status = 'held'
+          GROUP BY tier_id
+        `;
+        const sameTickets =
+          selectionKey(heldLines.map((line) => ({ tierId: line.tier_id, quantity: line.quantity }))) ===
+          selectionKey(input.lines);
+        const sameDiscount = (row.discount_id ?? null) === (discount?.id ?? null);
+        if (sameTickets && sameDiscount) {
+          const prior = holdView(row, true);
+          if (prior) return prior;
+          throw new HttpError(409, "This checkout expired. Start again.");
+        }
+        if (!sameTickets) {
+          await tx`
+            UPDATE tickets
+            SET status = 'available', held_until = NULL, order_id = NULL
+            WHERE order_id = ${row.id} AND status = 'held'
+          `;
+          const taken = await takeTickets();
+          subtotal = taken.subtotal;
+          picked = taken.picked;
+        } else {
+          for (const line of input.lines) {
+            const tier = tiers.get(line.tierId);
+            if (!tier) throw new HttpError(400, "Choose a ticket that is still on sale.");
+            subtotal += tier.price_kobo * line.quantity;
+          }
+        }
+      } else {
+        const taken = await takeTickets();
+        subtotal = taken.subtotal;
+        picked = taken.picked;
+      }
+
       const amounts = priced(subtotal, discount ? applyCut(subtotal, discount) : 0);
       const shown = publicAmounts(amounts.subtotal, amounts.total);
-      const heldUntil = new Date(Date.now() + holdMs);
-      const orderId = randomUUID();
-      await tx`
-        INSERT INTO orders (
-          id, event_id, first_name, last_name, email, phone, status,
-          subtotal_kobo, fees_kobo, total_kobo, discount_id, discount_kobo,
-          idempotency_key, held_until
-        ) VALUES (
-          ${orderId}, ${event.id}, ${input.contact.firstName}, ${input.contact.lastName},
-          ${input.contact.email}, ${input.contact.phone}, ${"held"},
-          ${amounts.subtotal}, ${0}, ${amounts.total}, ${discount?.id ?? null}, ${amounts.discountKobo},
-          ${key}, ${heldUntil.toISOString()}
-        )
-      `;
-      await tx`
-        UPDATE tickets
-        SET status = 'held', held_until = ${heldUntil.toISOString()}, order_id = ${orderId}
-        WHERE id IN ${tx(picked)}
-      `;
-      const positions = new Map<string, number>();
-      for (const recipient of input.recipients) {
-        const position = positions.get(recipient.tierId) ?? 0;
-        positions.set(recipient.tierId, position + 1);
+      if (row) {
         await tx`
-          INSERT INTO order_recipients (id, order_id, tier_id, position, name, email)
-          VALUES (${randomUUID()}, ${orderId}, ${recipient.tierId}, ${position}, ${recipient.name}, ${recipient.email})
+          UPDATE orders
+          SET first_name = ${input.contact.firstName}, last_name = ${input.contact.lastName},
+            email = ${input.contact.email}, phone = ${input.contact.phone}, status = ${"held"},
+            subtotal_kobo = ${amounts.subtotal}, fees_kobo = ${0}, total_kobo = ${amounts.total},
+            discount_id = ${discount?.id ?? null}, discount_kobo = ${amounts.discountKobo},
+            held_until = ${heldUntil.toISOString()}
+          WHERE id = ${row.id}
+        `;
+      } else {
+        await tx`
+          INSERT INTO orders (
+            id, event_id, first_name, last_name, email, phone, status,
+            subtotal_kobo, fees_kobo, total_kobo, discount_id, discount_kobo,
+            idempotency_key, held_until
+          ) VALUES (
+            ${orderId}, ${event.id}, ${input.contact.firstName}, ${input.contact.lastName},
+            ${input.contact.email}, ${input.contact.phone}, ${"held"},
+            ${amounts.subtotal}, ${0}, ${amounts.total}, ${discount?.id ?? null}, ${amounts.discountKobo},
+            ${key}, ${heldUntil.toISOString()}
+          )
         `;
       }
+      if (picked) {
+        await tx`
+          UPDATE tickets
+          SET status = 'held', held_until = ${heldUntil.toISOString()}, order_id = ${orderId}
+          WHERE id IN ${tx(picked)}
+        `;
+      } else {
+        await tx`
+          UPDATE tickets SET held_until = ${heldUntil.toISOString()}
+          WHERE order_id = ${orderId} AND status = 'held'
+        `;
+      }
+      await writeRecipients(orderId);
       if (input.eventUpdates || input.nearbyEvents) {
         await tx`
           INSERT INTO leads (id, email, source)

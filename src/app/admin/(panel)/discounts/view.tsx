@@ -32,9 +32,23 @@ export default function DiscountsPage() {
   const [amount, setAmount] = useState("2000");
   const [usageLimit, setUsageLimit] = useState("20");
   const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
+
+  function clearForm() {
+    setCode("");
+    setEventId(events[0]?.id ?? "");
+    setCut("percentage");
+    setPercent("10");
+    setAmount("2000");
+    setUsageLimit("20");
+  }
 
   async function onSubmit(formEvent: FormEvent<HTMLFormElement>) {
     formEvent.preventDefault();
+    if (pending) return;
+    const created = code.trim().toUpperCase();
+    setPending(true);
+    setError("");
     const message = await addDiscount({
       code,
       eventId,
@@ -43,13 +57,13 @@ export default function DiscountsPage() {
       amount: Number(amount),
       usageLimit: Number(usageLimit),
     });
+    setPending(false);
     if (message) {
       setError(message);
       return;
     }
-    setError("");
-    setCode("");
-    await showSuccess("Discount created", `${code.trim().toUpperCase()} is ready to use.`);
+    clearForm();
+    await showSuccess("Discount created", `${created} is ready to use.`);
   }
 
   async function onRedeem(id: string, discountCode: string) {
@@ -67,6 +81,7 @@ export default function DiscountsPage() {
       <PageHeading title="Discounts" />
       <form
         onSubmit={onSubmit}
+        aria-busy={pending}
         className="grid gap-4 rounded-2xl border border-line bg-white p-5 md:grid-cols-2"
       >
         <Field label="Code">
@@ -77,11 +92,13 @@ export default function DiscountsPage() {
               className={fieldClass}
               placeholder="EARLY10"
               required
+              disabled={pending}
             />
             <button
               type="button"
-              className={secondaryButtonClass}
+              className={`${secondaryButtonClass} disabled:cursor-wait disabled:opacity-60`}
               onClick={() => setCode(suggestCode())}
+              disabled={pending}
             >
               Generate
             </button>
@@ -92,6 +109,7 @@ export default function DiscountsPage() {
             value={eventId}
             onChange={(change) => setEventId(change.target.value)}
             className={fieldClass}
+            disabled={pending}
           >
             {events.map((event) => (
               <option key={event.id} value={event.id}>
@@ -109,6 +127,7 @@ export default function DiscountsPage() {
                 name="cut"
                 checked={cut === "percentage"}
                 onChange={() => setCut("percentage")}
+                disabled={pending}
               />
               Percentage cut
             </label>
@@ -118,6 +137,7 @@ export default function DiscountsPage() {
                 name="cut"
                 checked={cut === "fixed"}
                 onChange={() => setCut("fixed")}
+                disabled={pending}
               />
               Fixed amount
             </label>
@@ -131,6 +151,7 @@ export default function DiscountsPage() {
               onChange={(change) => setPercent(change.target.value)}
               className={fieldClass}
               required
+              disabled={pending}
             />
           </Field>
         ) : (
@@ -141,6 +162,7 @@ export default function DiscountsPage() {
               onChange={(change) => setAmount(change.target.value)}
               className={fieldClass}
               required
+              disabled={pending}
             />
           </Field>
         )}
@@ -151,6 +173,7 @@ export default function DiscountsPage() {
             onChange={(change) => setUsageLimit(change.target.value)}
             className={fieldClass}
             required
+            disabled={pending}
           />
         </Field>
         {error ? (
@@ -162,8 +185,12 @@ export default function DiscountsPage() {
             The code stays valid until the usage count is spent.
           </p>
         )}
-        <button type="submit" className={`${primaryButtonClass} md:col-span-2 md:justify-self-start`}>
-          Create code
+        <button
+          type="submit"
+          disabled={pending}
+          className={`${primaryButtonClass} disabled:cursor-wait disabled:opacity-60 md:col-span-2 md:justify-self-start`}
+        >
+          {pending ? "Creating…" : "Create code"}
         </button>
       </form>
       <ul className="flex flex-col gap-2">
