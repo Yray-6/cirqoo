@@ -1018,7 +1018,7 @@ function PaymentStep({
         </CheckRow>
         <CheckRow checked={eventUpdates} onChange={onEventUpdates}>
           Keep me updated on future events from{" "}
-          <span className="text-brand">AWE LAGOS</span>.
+          <span className="text-brand">CIRQOO</span>.
         </CheckRow>
         <CheckRow checked={nearbyEvents} onChange={onNearbyEvents}>
           Send me emails about the best events happening nearby or online.

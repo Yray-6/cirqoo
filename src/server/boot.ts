@@ -5,9 +5,14 @@ import { assertEnv, migrationUrl } from "@/server/env";
 import { migrate } from "@/server/migrate";
 import { seed } from "@/server/seed";
 
+function onnotice(notice: { code?: string }) {
+  if (notice.code === "42P07") return;
+  console.log(notice);
+}
+
 export async function boot() {
   assertEnv();
-  const sql = postgres(migrationUrl(), { max: 1 });
+  const sql = postgres(migrationUrl(), { max: 1, onnotice });
   try {
     await sql`SELECT pg_advisory_lock(842154)`;
     await migrate(sql);

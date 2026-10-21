@@ -199,10 +199,27 @@ export function AdminStoreProvider({
             }),
           refresh,
         ),
-      confirmOrder: (id) =>
-        message(() => api(`/api/admin/orders/${id}/confirm`, { method: "POST" }), refresh),
-      resendOrder: (id) =>
-        message(() => api(`/api/admin/orders/${id}/resend`, { method: "POST" }), refresh),
+      confirmOrder: async (id) => {
+        try {
+          const result = await api<{ emailError: string | null }>(`/api/admin/orders/${id}/confirm`, {
+            method: "POST",
+          });
+          await refresh().catch(() => undefined);
+          return result.emailError;
+        } catch (error) {
+          return error instanceof Error ? error.message : "Something went wrong.";
+        }
+      },
+      resendOrder: async (id) => {
+        try {
+          await api(`/api/admin/orders/${id}/resend`, { method: "POST" });
+          await refresh();
+          return null;
+        } catch (error) {
+          await refresh().catch(() => undefined);
+          return error instanceof Error ? error.message : "Something went wrong.";
+        }
+      },
     };
   }, [refresh, revision, role, state]);
 

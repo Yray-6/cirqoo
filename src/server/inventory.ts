@@ -526,8 +526,9 @@ export async function confirmOrder(orderId: string) {
     await finalizeOrder(tx, orderId, order.discount_id, null);
     return { already: false as const };
   });
-  if (!outcome.already) await deliverOrder(orderId);
-  return outcome;
+  if (outcome.already) return { ...outcome, emailError: null };
+  const emailError = await deliverOrder(orderId);
+  return { ...outcome, emailError };
 }
 
 const releasedAfterPayment = "Paid, but the reserved tickets were released and none are left. Refund or re-issue needed.";
@@ -609,7 +610,13 @@ export async function resendOrder(orderId: string) {
   const rows = await sql<{ status: string }[]>`SELECT status FROM orders WHERE id = ${orderId}`;
   if (!rows[0]) throw new HttpError(404, "Order not found.");
   if (rows[0].status !== "confirmed") throw new HttpError(409, "Only a confirmed order can be emailed.");
-  await deliverTickets(orderId);
+  const failure = await deliverTickets(orderId);
+  if (failure) throw failure;
+}
+
+function emailFailure(error: unknown) {
+  if (error instanceof HttpError) return error;
+  return new HttpError(502, "The ticket email could not be sent.");
 }
 
 async function deliverTickets(orderId: string) {
@@ -618,23 +625,25 @@ async function deliverTickets(orderId: string) {
   try {
     await sendTicketEmail(orderId);
     await sql`UPDATE orders SET email_error = NULL WHERE id = ${orderId}`;
+    return null;
   } catch (error) {
+    const failure = emailFailure(error);
     console.error("ticket email failed", error);
-    await sql`
-      UPDATE orders SET email_error = ${"The ticket email could not be sent."} WHERE id = ${orderId}
-    `;
+    await sql`UPDATE orders SET email_error = ${failure.message} WHERE id = ${orderId}`;
+    return failure;
   }
 }
 
 /** Tickets plus the purchaser's order summary (sent when there is a payment or when tickets went to other people). */
 async function deliverOrder(orderId: string) {
   const { sendReceiptEmail } = await import("@/server/mail");
-  await deliverTickets(orderId);
+  const failure = await deliverTickets(orderId);
   try {
     await sendReceiptEmail(orderId);
   } catch (error) {
     console.error("receipt email failed", error);
   }
+  return failure?.message ?? null;
 }
 
 /** Tickets, receipt, and the admin notice for a paid order. Only the ticket email is tracked on the order. */
