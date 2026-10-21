@@ -537,6 +537,29 @@ function TicketFace({ name, price }: { name: string; price: number }) {
   );
 }
 
+function TicketListSkeleton() {
+  return (
+    <div aria-busy="true" className="flex flex-col">
+      <span className="sr-only">Loading tickets</span>
+      {[0, 1].map((index) => (
+        <div
+          key={index}
+          className={`flex items-start justify-between gap-3 pb-7 min-[1100px]:gap-6 min-[1100px]:pb-8 ${
+            index > 0 ? "border-t border-[#E4E5E7] pt-7 min-[1100px]:pt-8" : ""
+          }`}
+        >
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            <div className="h-6 w-40 animate-pulse rounded bg-black/10 motion-reduce:animate-none min-[1100px]:h-[30px] min-[1100px]:w-52" />
+            <div className="h-6 w-24 animate-pulse rounded bg-black/10 motion-reduce:animate-none min-[1100px]:mt-2 min-[1100px]:h-[30px] min-[1100px]:w-28" />
+            <div className="mt-1 h-[22px] w-full max-w-md animate-pulse rounded bg-black/10 motion-reduce:animate-none" />
+          </div>
+          <div className="h-[46px] w-[92px] shrink-0 animate-pulse rounded-lg bg-black/10 motion-reduce:animate-none min-[1100px]:h-11 min-[1100px]:w-16" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function TicketStep({
   tiers,
   loading,
@@ -566,7 +589,7 @@ function TicketStep({
       </div>
       <div className="flex flex-col min-[1100px]:pt-2.5">
         {loading ? (
-          <p className="text-sm text-muted">Loading tickets…</p>
+          <TicketListSkeleton />
         ) : tiers.length === 0 ? (
           <p className="text-sm text-muted">Tickets are not on sale right now.</p>
         ) : null}
