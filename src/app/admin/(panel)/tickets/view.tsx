@@ -265,15 +265,23 @@ export default function TicketsPage() {
                 <p className="text-sm text-muted">
                   {order.email} · {order.ticketCount} tickets · {naira(order.total)}
                 </p>
+                {order.paymentReference ? (
+                  <p className="text-xs text-muted">Ref {order.paymentReference}</p>
+                ) : null}
                 {order.emailError ? <p className="text-sm font-bold text-brand">{order.emailError}</p> : null}
+                {order.paymentError ? <p className="text-sm font-bold text-brand">{order.paymentError}</p> : null}
               </div>
               <div className="flex items-center gap-3 text-sm">
                 <p className="font-bold text-ink">
                   {order.status === "held"
                     ? "Held"
                     : order.status === "confirmed"
-                      ? "Confirmed"
-                      : "Expired"}
+                      ? order.paid
+                        ? "Paid"
+                        : "Confirmed"
+                      : order.paid
+                        ? "Paid · needs attention"
+                        : "Expired"}
                 </p>
                 {order.status === "held" ? (
                   <button

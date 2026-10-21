@@ -60,6 +60,11 @@ export const orders = pgTable("orders", {
   heldUntil: timestamp("held_until", { withTimezone: true, mode: "date" }),
   confirmedAt: timestamp("confirmed_at", { withTimezone: true, mode: "date" }),
   emailError: text("email_error"),
+  paymentReference: text("payment_reference").unique(),
+  paidAt: timestamp("paid_at", { withTimezone: true, mode: "date" }),
+  paidKobo: integer("paid_kobo"),
+  paymentChannel: text("payment_channel"),
+  paymentError: text("payment_error"),
   createdAt,
 });
 
@@ -73,6 +78,15 @@ export const tickets = pgTable("tickets", {
   status: text("status").notNull(),
   heldUntil: timestamp("held_until", { withTimezone: true, mode: "date" }),
   scannedAt: timestamp("scanned_at", { withTimezone: true, mode: "date" }),
+});
+
+export const orderRecipients = pgTable("order_recipients", {
+  id: uuid("id").primaryKey(),
+  orderId: uuid("order_id").notNull(),
+  tierId: uuid("tier_id").notNull(),
+  position: integer("position").notNull(),
+  name: text("name").notNull(),
+  email: text("email").notNull(),
 });
 
 export const discounts = pgTable("discounts", {

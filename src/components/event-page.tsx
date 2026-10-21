@@ -38,7 +38,7 @@ export function EventPage({ soldOut = false }: { soldOut?: boolean }) {
     <main className="px-5 pt-3 pb-12 min-[1100px]:px-[72px] min-[1100px]:pt-2 min-[1100px]:pb-20">
       <nav
         aria-label="Breadcrumb"
-        className="mb-2.5 text-[10px] leading-6 text-[#61646C] min-[1100px]:mb-8 min-[1100px]:text-sm min-[1100px]:leading-5 min-[1100px]:text-muted"
+        className="mb-2.5 text-sm leading-6 text-[#61646C] min-[1100px]:mb-8 min-[1100px]:text-sm min-[1100px]:leading-5 min-[1100px]:text-muted"
       >
         <ol className="flex flex-wrap items-center gap-2">
           <li>Event</li>
@@ -68,20 +68,20 @@ export function EventPage({ soldOut = false }: { soldOut?: boolean }) {
             />
           </div>
           {soldOut ? (
-            <span className="order-2 flex h-12 items-center justify-center rounded-lg bg-[#CECECE] text-[10px] font-semibold text-white min-[1100px]:order-none min-[1100px]:h-auto min-[1100px]:px-6 min-[1100px]:py-6 min-[1100px]:text-base min-[1100px]:font-normal min-[1100px]:leading-5">
+            <span className="order-2 flex h-12 items-center justify-center rounded-lg bg-[#CECECE] text-base font-semibold text-white min-[1100px]:order-none min-[1100px]:h-auto min-[1100px]:px-6 min-[1100px]:py-6 min-[1100px]:font-normal min-[1100px]:leading-5">
               Sold out
             </span>
           ) : (
             <a
               id="get-ticket"
               href="/checkout"
-              className="order-2 flex h-12 items-center justify-center rounded-lg bg-[#3F3F3F] text-[10px] font-semibold text-white hover:bg-[#2c2c2c] min-[1100px]:order-none min-[1100px]:h-auto min-[1100px]:bg-brand min-[1100px]:px-6 min-[1100px]:py-6 min-[1100px]:text-base min-[1100px]:font-normal min-[1100px]:leading-5 min-[1100px]:hover:bg-[#e4572c]"
+              className="order-2 flex h-12 items-center justify-center rounded-lg bg-[#3F3F3F] text-base font-semibold text-white hover:bg-[#2c2c2c] min-[1100px]:order-none min-[1100px]:h-auto min-[1100px]:bg-brand min-[1100px]:px-6 min-[1100px]:py-6 min-[1100px]:font-normal min-[1100px]:leading-5 min-[1100px]:hover:bg-[#e4572c]"
             >
               Get a Ticket
             </a>
           )}
           <section className="order-4 flex items-center justify-between gap-4 border-b-2 border-line py-2.5 min-[1100px]:order-none min-[1100px]:flex-col min-[1100px]:items-stretch min-[1100px]:py-0 min-[1100px]:pb-10">
-            <h2 className="text-[10px] font-black leading-6 text-ink min-[1100px]:text-base min-[1100px]:text-black">
+            <h2 className="text-base font-black leading-6 text-ink min-[1100px]:text-base min-[1100px]:text-black">
               Hosted by
             </h2>
             <div className="flex items-center gap-4 min-[1100px]:mt-[18px]">
@@ -93,10 +93,10 @@ export function EventPage({ soldOut = false }: { soldOut?: boolean }) {
                 className="h-7 w-[35px] object-contain min-[1100px]:h-14 min-[1100px]:w-[67px]"
               />
               <div>
-                <p className="text-xs font-extrabold text-black min-[1100px]:text-base min-[1100px]:leading-5">
+                <p className="text-base font-extrabold text-black min-[1100px]:leading-5">
                   Cirqoo
                 </p>
-                <p className="text-[10px] text-muted min-[1100px]:text-sm min-[1100px]:leading-[21px]">
+                <p className="text-sm text-muted min-[1100px]:text-sm min-[1100px]:leading-[21px]">
                   @cirqoo
                 </p>
               </div>
@@ -106,7 +106,7 @@ export function EventPage({ soldOut = false }: { soldOut?: boolean }) {
 
         <div className="contents min-[1100px]:flex min-[1100px]:min-w-0 min-[1100px]:flex-1 min-[1100px]:flex-col min-[1100px]:gap-10">
           <section className="order-3 flex flex-col gap-2.5 border-b-2 border-line pb-7 min-[1100px]:order-none min-[1100px]:block min-[1100px]:pb-10">
-            <h1 className="text-xs font-bold leading-8 text-ink min-[1100px]:max-w-[592px] min-[1100px]:text-[30px] min-[1100px]:font-black min-[1100px]:leading-[38px] min-[1100px]:text-black">
+            <h1 className="text-xl font-bold leading-8 text-ink min-[1100px]:max-w-[592px] min-[1100px]:text-[30px] min-[1100px]:font-black min-[1100px]:leading-[38px] min-[1100px]:text-black">
               Cirqoo After Hours - Karaoke & Games
             </h1>
             <ul className="flex flex-col min-[1100px]:mt-[22px]">
@@ -122,13 +122,13 @@ export function EventPage({ soldOut = false }: { soldOut?: boolean }) {
                     height={24}
                     className="size-6"
                   />
-                  <span className="text-[10px] leading-6 text-ink min-[1100px]:text-base">
+                  <span className="text-sm leading-6 text-ink min-[1100px]:text-base">
                     {item.text}
                   </span>
                 </li>
               ))}
             </ul>
-            <p className="rounded-lg bg-[rgba(252,100,53,0.1)] p-4 text-[8px] leading-6 text-ink min-[1100px]:mt-[22px] min-[1100px]:max-w-[500px] min-[1100px]:text-xs min-[1100px]:leading-[18px]">
+            <p className="rounded-lg bg-[rgba(252,100,53,0.1)] p-4 text-sm leading-6 text-ink min-[1100px]:mt-[22px] min-[1100px]:max-w-[500px] min-[1100px]:leading-5">
               For a smooth experience, we recommend purchasing tickets in
               advance, as they may not be available at the door. Capacity is
               limited!
@@ -136,10 +136,10 @@ export function EventPage({ soldOut = false }: { soldOut?: boolean }) {
           </section>
 
           <section className="order-5 flex flex-col gap-2.5 border-b-2 border-line py-2.5 pb-7 min-[1100px]:order-none min-[1100px]:block min-[1100px]:py-0 min-[1100px]:pb-10">
-            <h2 className="text-[10px] font-black leading-6 text-ink min-[1100px]:text-base min-[1100px]:text-black">
+            <h2 className="text-base font-black leading-6 text-ink min-[1100px]:text-base min-[1100px]:text-black">
               About this event
             </h2>
-            <div className="flex max-w-[921px] flex-col gap-2.5 text-[10px] leading-6 text-ink min-[1100px]:mt-[18px] min-[1100px]:gap-6 min-[1100px]:text-base">
+            <div className="flex max-w-[921px] flex-col gap-2.5 text-sm leading-6 text-ink min-[1100px]:mt-[18px] min-[1100px]:gap-6 min-[1100px]:text-base">
               {about.map((paragraph) => (
                 <p key={paragraph} className="whitespace-pre-line">
                   {paragraph}
@@ -149,7 +149,7 @@ export function EventPage({ soldOut = false }: { soldOut?: boolean }) {
           </section>
 
           <section className="order-6 flex flex-col gap-[18px] border-b-2 border-line py-2.5 pb-7 min-[1100px]:order-none min-[1100px]:block min-[1100px]:py-0 min-[1100px]:pb-10">
-            <h2 className="text-[10px] font-black leading-6 text-ink min-[1100px]:text-base min-[1100px]:text-black">
+            <h2 className="text-base font-black leading-6 text-ink min-[1100px]:text-base min-[1100px]:text-black">
               Directions
             </h2>
             <div className="relative min-[1100px]:mt-[18px] min-[1100px]:max-w-[564px]">
@@ -162,15 +162,15 @@ export function EventPage({ soldOut = false }: { soldOut?: boolean }) {
               />
               <div className="absolute top-4 left-2 w-[min(300px,calc(100%-16px))] rounded-lg bg-white p-3 shadow-[0_1px_4px_rgba(0,0,0,0.19)] min-[1100px]:hidden">
                 <div className="flex items-start justify-between gap-2">
-                  <p className="text-[10px] font-medium text-black">Halo Lagos</p>
+                  <p className="text-sm font-medium text-black">Halo Lagos</p>
                   <a href={mapLink} aria-label="Get directions">
                     <Image src="/directions.svg" alt="" width={20} height={20} />
                   </a>
                 </div>
-                <p className="mt-1 text-[8px] leading-4 text-[#5E5E5E]">
+                <p className="mt-1 text-xs leading-4 text-[#5E5E5E]">
                   11b Hakeem Dickson Link Rd, Eti-Osa, Lekki 106104, Lagos
                 </p>
-                <p className="mt-1 text-[8px] text-[#5E5E5E]">4.1 ★ (704)</p>
+                <p className="mt-1 text-xs text-[#5E5E5E]">4.1 ★ (704)</p>
               </div>
               <a href={mapLink} className="hidden min-[1100px]:block">
                 <Image
