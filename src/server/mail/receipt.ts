@@ -45,7 +45,12 @@ export async function sendReceiptEmail(orderId: string) {
   const batches = batchTickets(order, await loadTickets(orderId));
   const others = batches.filter((batch) => !batch.purchaser);
   const own = batches.find((batch) => batch.purchaser);
-  if (!paid && others.length === 0) return;
+  if (!paid && others.length === 0) {
+    console.error(
+      `receipt email skipped ${JSON.stringify({ orderId, reason: "no payment and no other recipients" })}`,
+    );
+    return;
+  }
 
   const whereTickets =
     others.length === 0

@@ -618,8 +618,8 @@ async function deliverTickets(orderId: string) {
   try {
     await sendTicketEmail(orderId);
     await sql`UPDATE orders SET email_error = NULL WHERE id = ${orderId}`;
-  } catch {
-    console.error("ticket email failed");
+  } catch (error) {
+    console.error("ticket email failed", error);
     await sql`
       UPDATE orders SET email_error = ${"The ticket email could not be sent."} WHERE id = ${orderId}
     `;
@@ -632,8 +632,8 @@ async function deliverOrder(orderId: string) {
   await deliverTickets(orderId);
   try {
     await sendReceiptEmail(orderId);
-  } catch {
-    console.error("receipt email failed");
+  } catch (error) {
+    console.error("receipt email failed", error);
   }
 }
 
@@ -643,8 +643,8 @@ export async function deliverPaidOrder(orderId: string) {
   await deliverOrder(orderId);
   try {
     await sendAdminOrderNotice(orderId);
-  } catch {
-    console.error("admin notice email failed");
+  } catch (error) {
+    console.error("admin notice email failed", error);
   }
 }
 
@@ -653,8 +653,8 @@ export async function reportPaymentProblem(orderId: string) {
   const { sendAdminOrderNotice } = await import("@/server/mail");
   try {
     await sendAdminOrderNotice(orderId);
-  } catch {
-    console.error("admin notice email failed");
+  } catch (error) {
+    console.error("admin notice email failed", error);
   }
 }
 

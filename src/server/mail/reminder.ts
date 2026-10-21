@@ -71,6 +71,9 @@ export async function sendEventReminders(eventId: string, note = "") {
   }
   const results = await Promise.allSettled(sends);
   const failed = results.filter((result) => result.status === "rejected");
+  for (const result of failed) {
+    console.error("reminder email failed", result.reason);
+  }
   if (failed.length > 0) {
     throw new HttpError(502, `${failed.length} of ${results.length} reminder emails could not be sent.`);
   }

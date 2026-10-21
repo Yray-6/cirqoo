@@ -25,7 +25,10 @@ function purchaseLines(lines: MailLine[]) {
 
 export async function sendAdminOrderNotice(orderId: string) {
   const to = adminEmail();
-  if (!to) return;
+  if (!to) {
+    console.error(`admin notice email skipped ${JSON.stringify({ orderId, reason: "ADMIN_EMAIL is not set" })}`);
+    return;
+  }
   const { order, lines } = await loadMailOrder(orderId);
   const buyer = `${order.first_name} ${order.last_name}`.trim();
   const problem = order.payment_error;

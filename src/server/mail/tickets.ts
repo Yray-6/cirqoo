@@ -116,6 +116,9 @@ export async function sendTicketEmail(orderId: string) {
     batchTickets(order, tickets).map((batch) => sendBatch(order, lines, batch)),
   );
   const failed = results.filter((result) => result.status === "rejected");
+  for (const result of failed) {
+    console.error("ticket email batch failed", result.reason);
+  }
   if (failed.length > 0) {
     throw new HttpError(502, `${failed.length} of ${results.length} ticket emails could not be sent.`);
   }
