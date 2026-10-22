@@ -51,6 +51,7 @@ type AdminStore = AdminState & {
   revision: number;
   createEvent: (draft: EventDraft) => Promise<string | null>;
   updateEvent: (id: string, draft: EventDraft) => Promise<string | null>;
+  deleteEvent: (id: string) => Promise<string | null>;
   provisionTickets: (eventId: string, tierId: string, count: number) => Promise<string | null>;
   deleteTickets: (
     eventId: string,
@@ -133,6 +134,8 @@ export function AdminStoreProvider({
           () => api(`/api/admin/events/${id}`, { method: "POST", body: JSON.stringify(draft) }),
           refresh,
         ),
+      deleteEvent: (id) =>
+        message(() => api(`/api/admin/events/${id}/delete`, { method: "POST" }), refresh),
       provisionTickets: (eventId, tierId, count) =>
         message(
           () =>

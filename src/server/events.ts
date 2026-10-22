@@ -188,6 +188,38 @@ export async function updateEvent(eventId: string, input: EventInput) {
   });
 }
 
+export async function deleteEvent(eventId: string) {
+  const sql = getSql();
+  await sql.begin(async (tx) => {
+    await tx`SELECT pg_advisory_xact_lock(hashtext(${eventId}))`;
+    const found = await tx<{ id: string }[]>`SELECT id FROM events WHERE id = ${eventId} FOR UPDATE`;
+    if (!found[0]) throw new HttpError(404, "Event not found.");
+    const [{ committed }] = await tx<{ committed: string }[]>`
+      SELECT COUNT(*)::text AS committed FROM tickets
+      WHERE event_id = ${eventId} AND status <> 'available'
+    `;
+    if (committed !== "0") {
+      throw new HttpError(409, "This event has held or sold tickets, so it cannot be deleted.");
+    }
+    const [{ confirmed }] = await tx<{ confirmed: string }[]>`
+      SELECT COUNT(*)::text AS confirmed FROM orders
+      WHERE event_id = ${eventId} AND status = 'confirmed'
+    `;
+    if (confirmed !== "0") {
+      throw new HttpError(409, "This event has paid orders, so it cannot be deleted.");
+    }
+    await tx`
+      DELETE FROM order_recipients
+      WHERE order_id IN (SELECT id FROM orders WHERE event_id = ${eventId})
+    `;
+    await tx`DELETE FROM tickets WHERE event_id = ${eventId}`;
+    await tx`DELETE FROM orders WHERE event_id = ${eventId}`;
+    await tx`DELETE FROM discounts WHERE event_id = ${eventId}`;
+    await tx`DELETE FROM tiers WHERE event_id = ${eventId}`;
+    await tx`DELETE FROM events WHERE id = ${eventId}`;
+  });
+}
+
 export async function provisionTickets(eventId: string, tierId: string, count: number) {
   if (!Number.isInteger(count) || count < 1 || count > 500) {
     throw new HttpError(400, "Add between 1 and 500 tickets.");

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   fromUtcInput,
@@ -11,6 +11,7 @@ import {
   type EventStatus,
 } from "@/lib/admin-mock";
 import { useAdminStore } from "@/components/admin/admin-store";
+import { ConfirmModal } from "@/components/admin/confirm-modal";
 import { useNavPending } from "@/components/admin/nav-pending";
 import { useSuccess } from "@/components/admin/success-modal";
 import {
@@ -71,6 +72,12 @@ export function EventForm({ eventId }: { eventId?: string }) {
     existing ? rowsFromTiers(existing.tiers) : [emptyRow()],
   );
   const [error, setError] = useState("");
+  const [modalError, setModalError] = useState("");
+  const [draft, setDraft] = useState<EventDraft | null>(null);
+  const [confirmKind, setConfirmKind] = useState<"save" | "delete" | null>(null);
+  const [confirmTick, setConfirmTick] = useState(0);
+  const [pending, setPending] = useState(false);
+  const pendingRef = useRef(false);
 
   if (eventId && !existing) {
     return (
@@ -91,6 +98,7 @@ export function EventForm({ eventId }: { eventId?: string }) {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (pendingRef.current) return;
     if (!title.trim() || !venue.trim()) {
       setError("Add a title and a venue.");
       return;
@@ -129,7 +137,11 @@ export function EventForm({ eventId }: { eventId?: string }) {
       });
     }
 
-    const draft: EventDraft = {
+    setError("");
+    setModalError("");
+    setConfirmKind("save");
+    setConfirmTick((current) => current + 1);
+    setDraft({
       title,
       description,
       venue,
@@ -137,29 +149,70 @@ export function EventForm({ eventId }: { eventId?: string }) {
       endsAt: fromUtcInput(endsAt),
       status,
       tiers: parsed,
-    };
+    });
+  }
 
-    if (eventId) {
-      const message = await store.updateEvent(eventId, draft);
-      if (message) {
-        setError(message);
-        return;
-      }
-      await showSuccess("Event updated", "Your changes are saved.");
-    } else {
-      const message = await store.createEvent(draft);
-      if (message) {
-        setError(message);
-        return;
-      }
-      await showSuccess("Event created", "The event is on your events list.");
+  function closeConfirm() {
+    if (pendingRef.current) return;
+    setDraft(null);
+    setConfirmKind(null);
+    setModalError("");
+  }
+
+  function askDelete() {
+    if (pendingRef.current) return;
+    setError("");
+    setModalError("");
+    setConfirmKind("delete");
+    setConfirmTick((current) => current + 1);
+  }
+
+  async function confirmSave() {
+    if (!draft || pendingRef.current) return;
+    pendingRef.current = true;
+    setPending(true);
+    setModalError("");
+    const message = eventId
+      ? await store.updateEvent(eventId, draft)
+      : await store.createEvent(draft);
+    if (message) {
+      setModalError(message);
+      pendingRef.current = false;
+      setPending(false);
+      return;
     }
+    setDraft(null);
+    setConfirmKind(null);
+    await showSuccess(
+      eventId ? "Event updated" : "Event created",
+      eventId ? "Your changes are saved." : "The event is on your events list.",
+    );
+    expect("/admin/events");
+    router.push("/admin/events");
+  }
+
+  async function confirmDelete() {
+    if (!eventId || pendingRef.current) return;
+    pendingRef.current = true;
+    setPending(true);
+    setModalError("");
+    const message = await store.deleteEvent(eventId);
+    if (message) {
+      setModalError(message);
+      pendingRef.current = false;
+      setPending(false);
+      return;
+    }
+    setDraft(null);
+    setConfirmKind(null);
+    await showSuccess("Event deleted", "The event has been removed.");
     expect("/admin/events");
     router.push("/admin/events");
   }
 
   return (
-    <form onSubmit={onSubmit} className="mx-auto flex max-w-3xl flex-col gap-5">
+    <div className="mx-auto flex max-w-3xl flex-col gap-5">
+      <form onSubmit={onSubmit} className="flex flex-col gap-5">
       <PageHeading title={eventId ? "Edit event" : "Create event"} />
       <div className="grid gap-4 rounded-2xl border border-line bg-white p-5 md:grid-cols-2">
         <div className="md:col-span-2">
@@ -315,7 +368,44 @@ export function EventForm({ eventId }: { eventId?: string }) {
         <Link href="/admin/events" className={secondaryButtonClass}>
           Cancel
         </Link>
+        {eventId ? (
+          <button type="button" className={`${secondaryButtonClass} text-brand`} onClick={askDelete}>
+            Delete event
+          </button>
+        ) : null}
       </div>
-    </form>
+      </form>
+      <ConfirmModal
+        key={confirmTick}
+        open={confirmKind !== null}
+        title={
+          confirmKind === "delete"
+            ? "Delete this event?"
+            : eventId
+              ? "Save this event?"
+              : "Create this event?"
+        }
+        confirmLabel={confirmKind === "delete" ? "Delete" : "Yes"}
+        pendingLabel={
+          confirmKind === "delete" ? "Deleting…" : eventId ? "Saving…" : "Creating…"
+        }
+        pending={pending}
+        onConfirm={() => void (confirmKind === "delete" ? confirmDelete() : confirmSave())}
+        onClose={closeConfirm}
+      >
+        <p>
+          {confirmKind === "delete"
+            ? "Do you want to delete this event? Its tickets and discount codes will be removed."
+            : eventId
+              ? "Do you want to save this event?"
+              : "Do you want to create this event?"}
+        </p>
+        {modalError ? (
+          <p role="alert" className="mt-2 font-bold text-brand">
+            {modalError}
+          </p>
+        ) : null}
+      </ConfirmModal>
+    </div>
   );
 }

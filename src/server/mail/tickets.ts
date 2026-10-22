@@ -91,7 +91,10 @@ async function sendBatch(order: MailOrder, lines: MailLine[], batch: Batch) {
         ${textLine(`Hi ${escapeHtml(batch.name || "there")},`)}
         ${intro}
         ${eventTitle(order.title)}
-        ${eventDetails({ ...schedule, venue: order.venue })}
+        ${eventDetails({
+          ...schedule,
+          venue: "Halo Lagos (Gothic Restaurant), 11b Hakeem Dickson Link Rd, Eti-Osa, Lekki 106104, Lagos",
+        })}
         ${batch.purchaser ? purchaseTable(purchaseLines(lines), extras) : ""}
         ${textLine("Present this QR at the Entrance as it holds your RSVP information", {
           size: 10,

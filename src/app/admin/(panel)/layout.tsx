@@ -9,7 +9,8 @@ export default async function PanelLayout({ children }: LayoutProps<"/admin">) {
   const user = await currentUser();
   if (!user) redirect("/admin/login");
   const path = (await headers()).get("x-pathname") ?? "";
-  if (path && user.mustChangePassword && !path.startsWith("/admin/profile")) {
+  const scanPath = path === "/admin/scan" || path.startsWith("/admin/scan/");
+  if (path && user.mustChangePassword && !path.startsWith("/admin/profile") && !scanPath) {
     redirect("/admin/profile");
   }
   if (

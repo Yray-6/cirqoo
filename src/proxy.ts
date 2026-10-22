@@ -8,6 +8,10 @@ function isStaffPath(pathname: string) {
   return staffPaths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 }
 
+function isScanPath(pathname: string) {
+  return pathname === "/admin/scan" || pathname.startsWith("/admin/scan/");
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const claims = await verifySession(request.cookies.get(sessionCookie)?.value);
@@ -28,7 +32,12 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL("/admin/login", request.url));
   }
 
-  if (claims?.mcp && pathname.startsWith("/admin") && !pathname.startsWith("/admin/profile")) {
+  if (
+    claims?.mcp &&
+    pathname.startsWith("/admin") &&
+    !pathname.startsWith("/admin/profile") &&
+    !isScanPath(pathname)
+  ) {
     return NextResponse.redirect(new URL("/admin/profile", request.url));
   }
 
