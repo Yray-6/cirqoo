@@ -201,19 +201,19 @@ export function EventPage({ soldOut = false }: { soldOut?: boolean }) {
             </h2>
             <div className="mt-[18px] flex items-center gap-6">
               <a
-                href="https://tix.africa"
+                href="https://www.instagram.com/cirqoo?vrfl=YmoxMjFhajhucG1h"
                 aria-label="Instagram"
                 className="inline-flex h-5 items-center"
               >
                 <Image src="/instagram.svg" alt="" width={20} height={20} />
               </a>
-              <a
-                href="https://tix.africa"
+              {/* <a
+                href="https://www.instagram.com/cirqoo?vrfl=YmoxMjFhajhucG1h"
                 aria-label="X"
                 className="inline-flex h-5 items-center"
               >
                 <Image src="/x-twitter.svg" alt="" width={23} height={20} />
-              </a>
+              </a> */}
             </div>
           </section>
         </div>
