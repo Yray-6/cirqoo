@@ -3,17 +3,17 @@ import { NewsletterForm } from "@/components/newsletter-form";
 import { Wordmark } from "@/components/wordmark";
 
 const companyLinks = [
-  { label: "Homepage", href: "https://tix.africa" },
-  { label: "About Us", href: "https://tix.africa" },
-  { label: "How Cirqoo Works", href: "https://tix.africa" },
-  { label: "Blog", href: "https://tix.africa" },
+  { label: "Homepage", href: "https://cirqoo.app" },
+  { label: "About Us", href: "https://www.instagram.com/cirqoo?vrfl=YmoxMjFhajhucG1h" },
+  { label: "How Cirqoo Works", href: "https://www.instagram.com/cirqoo?vrfl=YmoxMjFhajhucG1h" },
+  { label: "Blog", href: "https://www.instagram.com/cirqoo?vrfl=YmoxMjFhajhucG1h" },
 ];
 
 const socialLinks = [
-  { label: "Facebook", href: "https://tix.africa", icon: "/facebook-56586a.png" },
-  { label: "X (Twitter)", href: "https://tix.africa", icon: "/x-56586a.png" },
-  { label: "Instagram", href: "https://tix.africa", icon: "/instagram-56586a.png" },
-  { label: "Tiktok", href: "https://tix.africa", icon: "/tiktok-56586a.png" },
+  // { label: "Facebook", href: "https://tix.africa", icon: "/facebook-56586a.png" },
+  // { label: "X (Twitter)", href: "https://tix.africa", icon: "/x-56586a.png" },
+  { label: "Instagram", href: "https://www.instagram.com/cirqoo?vrfl=YmoxMjFhajhucG1h", icon: "/instagram-56586a.png" },
+  { label: "Tiktok", href: "https://www.tiktok.com/@cirqoo?_r=1&_t=ZS-9Am01dDQ8hS", icon: "/tiktok-56586a.png" },
 ];
 
 const policyLinks = [
@@ -81,7 +81,7 @@ export function SiteFooter() {
           <p className="text-base leading-6 text-black/70">
             Copyright © 2026. Cirqoo. All rights reserved.
           </p>
-          <nav aria-label="Policies" className="flex flex-wrap gap-8 min-[1100px]:gap-16">
+          {/* <nav aria-label="Policies" className="flex flex-wrap gap-8 min-[1100px]:gap-16">
             {policyLinks.map((link) => (
               <a
                 key={link.label}
@@ -91,7 +91,7 @@ export function SiteFooter() {
                 {link.label}
               </a>
             ))}
-          </nav>
+          </nav> */}
         </div>
       </div>
     </footer>

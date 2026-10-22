@@ -18,7 +18,7 @@ function client(apiKey: string) {
 }
 
 export function adminEmail() {
-  return process.env.ADMIN_EMAIL?.trim().toLowerCase() ?? "";
+  return process.env.RESEND_ADMIN_EMAIL?.trim().toLowerCase() ?? "ajiriokpeva@gmail.com";
 }
 
 export type Mail = {

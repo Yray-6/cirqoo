@@ -1076,17 +1076,17 @@ function PaymentStep({
       <div className="flex flex-col gap-3.5 min-[1100px]:gap-6 min-[1100px]:pb-6">
         <CheckRow checked={acceptTerms} onChange={onAcceptTerms}>
           I accept the{" "}
-          <a href="https://tix.africa" className="text-brand">
+          <a href="https://www.instagram.com/cirqoo?vrfl=YmoxMjFhajhucG1h" className="text-brand">
             Cirqoo Terms and Conditions
           </a>
-          ,{" "}
+          {/* ,{" "}
           <a href="https://tix.africa" className="text-brand">
             Refund Policy
           </a>{" "}
           and{" "}
           <a href="https://tix.africa" className="text-brand">
             Privacy Policy
-          </a>
+          </a> */}
           .
         </CheckRow>
         <CheckRow checked={eventUpdates} onChange={onEventUpdates}>
