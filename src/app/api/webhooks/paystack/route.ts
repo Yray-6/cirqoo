@@ -21,9 +21,13 @@ export async function POST(request: Request) {
   }
   if (!isRecord(payload) || !isRecord(payload.data)) return Response.json({ ok: true });
 
-  if (payload.event === "charge.success" && typeof payload.data.reference === "string") {
+  const event = typeof payload.event === "string" ? payload.event : "";
+  const reference = typeof payload.data.reference === "string" ? payload.data.reference : null;
+  console.error(`paystack settle ${JSON.stringify({ source: "webhook", event, reference })}`);
+
+  if (event === "charge.success" && reference) {
     try {
-      const result = await settlePayment(payload.data.reference);
+      const result = await settlePayment(reference, "webhook");
       return Response.json({ ok: true, status: result.status });
     } catch (error) {
       const detail = error instanceof Error ? error.message : "unknown error";

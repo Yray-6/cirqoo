@@ -7,7 +7,7 @@ export const POST = apiPost(async (request) => {
   const body = await readJson(request);
   const reference = isRecord(body) ? asString(body.reference) : "";
   if (!reference) throw new HttpError(400, "That payment reference is not valid.");
-  const result = await settlePayment(reference);
+  const result = await settlePayment(reference, "callback");
   const response = Response.json(result);
   if (result.status === "paid") {
     const secure = (process.env.APP_ORIGIN ?? "").startsWith("https://");

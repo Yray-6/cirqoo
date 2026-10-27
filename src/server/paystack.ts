@@ -163,11 +163,32 @@ export type SettleResult =
   | { status: "pending"; orderId: string | null }
   | { status: "failed"; orderId: string | null; reason: string };
 
+export type SettleSource = "webhook" | "callback";
+
 const pendingStatuses = new Set(["pending", "ongoing", "processing", "queued", "send_otp", "send_pin", "open"]);
 
-export async function settlePayment(reference: string): Promise<SettleResult> {
+function logSettle(fields: Record<string, unknown>) {
+  console.error(`paystack settle ${JSON.stringify(fields)}`);
+}
+
+export async function settlePayment(reference: string, source: SettleSource): Promise<SettleResult> {
   const sql = getSql();
-  const tx = await verifyTransaction(reference);
+  let tx: VerifiedTransaction;
+  try {
+    tx = await verifyTransaction(reference);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "unknown error";
+    logSettle({ source, reference, outcome: "error", reason });
+    throw error;
+  }
+
+  const base = {
+    source,
+    reference: tx.reference,
+    status: tx.status,
+    amount: tx.amountKobo,
+    currency: tx.currency,
+  };
 
   let orderId = /^[0-9a-f-]{36}$/i.test(tx.orderId) ? tx.orderId : "";
   if (!orderId) {
@@ -176,23 +197,41 @@ export async function settlePayment(reference: string): Promise<SettleResult> {
     `;
     orderId = byReference[0]?.id ?? "";
   }
-  if (!orderId) throw new HttpError(404, "No order matches that payment.");
+  if (!orderId) {
+    const reason = "No order matches that payment.";
+    logSettle({ ...base, orderId: null, outcome: "error", reason });
+    throw new HttpError(404, reason);
+  }
 
   const rows = await sql<{ status: string; email: string; total_kobo: number; payment_error: string | null }[]>`
     SELECT status, email, total_kobo, payment_error FROM orders WHERE id = ${orderId}
   `;
   const order = rows[0];
-  if (!order) throw new HttpError(404, "Order not found.");
+  if (!order) {
+    const reason = "Order not found.";
+    logSettle({ ...base, orderId, outcome: "error", reason });
+    throw new HttpError(404, reason);
+  }
+
+  const withOrder = { ...base, orderId, orderStatus: order.status };
+
   if (order.status === "confirmed") {
+    logSettle({ ...withOrder, outcome: "paid", already: true });
     return { status: "paid", orderId, email: order.email, already: true, problem: null };
   }
   if (order.payment_error) {
+    logSettle({ ...withOrder, outcome: "problem", reason: order.payment_error, already: true });
     return { status: "paid", orderId, email: order.email, already: true, problem: order.payment_error };
   }
 
   if (tx.status !== "success") {
-    if (pendingStatuses.has(tx.status)) return { status: "pending", orderId };
-    return { status: "failed", orderId, reason: tx.status === "abandoned" ? "The payment was not completed." : "The payment did not go through." };
+    if (pendingStatuses.has(tx.status)) {
+      logSettle({ ...withOrder, outcome: "pending" });
+      return { status: "pending", orderId };
+    }
+    const reason = tx.status === "abandoned" ? "The payment was not completed." : "The payment did not go through.";
+    logSettle({ ...withOrder, outcome: "failed", reason });
+    return { status: "failed", orderId, reason };
   }
   if (tx.currency !== "NGN" || tx.amountKobo < order.total_kobo) {
     const problem = `Paystack reported ${tx.currency} ${tx.amountKobo} for an order of NGN ${order.total_kobo} kobo. Check reference ${tx.reference}.`;
@@ -201,6 +240,7 @@ export async function settlePayment(reference: string): Promise<SettleResult> {
       WHERE id = ${orderId} AND payment_error IS NULL
     `;
     await reportPaymentProblem(orderId);
+    logSettle({ ...withOrder, outcome: "failed", reason: problem });
     return { status: "failed", orderId, reason: "The amount paid does not match this order. We have been notified." };
   }
 
@@ -210,11 +250,28 @@ export async function settlePayment(reference: string): Promise<SettleResult> {
     channel: tx.channel,
     paidAt: tx.paidAt,
   };
-  const outcome = await finalizePaidOrder(orderId, payment, tx.lines);
+  let outcome: { already: boolean; problem: string | null };
+  try {
+    outcome = await finalizePaidOrder(orderId, payment, tx.lines);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "unknown error";
+    logSettle({ ...withOrder, outcome: "error", reason });
+    throw error;
+  }
   if (outcome.problem) {
     await reportPaymentProblem(orderId);
+    logSettle({ ...withOrder, outcome: "problem", reason: outcome.problem });
     return { status: "paid", orderId, email: order.email, already: false, problem: outcome.problem };
   }
-  if (!outcome.already) await deliverPaidOrder(orderId);
+  if (!outcome.already) {
+    try {
+      await deliverPaidOrder(orderId);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "unknown error";
+      logSettle({ ...withOrder, outcome: "error", reason });
+      throw error;
+    }
+  }
+  logSettle({ ...withOrder, outcome: "paid", already: outcome.already });
   return { status: "paid", orderId, email: order.email, already: outcome.already, problem: null };
 }
