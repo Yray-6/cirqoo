@@ -67,6 +67,7 @@ type AdminStore = AdminState & {
   disableStaff: (id: string) => Promise<string | null>;
   confirmOrder: (id: string) => Promise<string | null>;
   resendOrder: (id: string) => Promise<string | null>;
+  sendEventReminder: (id: string, note: string) => Promise<{ error: string | null; sent: number }>;
 };
 
 type AdminStoreContextValue = {
@@ -221,6 +222,20 @@ export function AdminStoreProvider({
         } catch (error) {
           await refresh().catch(() => undefined);
           return error instanceof Error ? error.message : "Something went wrong.";
+        }
+      },
+      sendEventReminder: async (id, note) => {
+        try {
+          const result = await api<{ sent: number }>(`/api/admin/events/${id}/remind`, {
+            method: "POST",
+            body: JSON.stringify({ note }),
+          });
+          return { error: null, sent: result.sent };
+        } catch (error) {
+          return {
+            error: error instanceof Error ? error.message : "Something went wrong.",
+            sent: 0,
+          };
         }
       },
     };

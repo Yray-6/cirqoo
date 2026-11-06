@@ -12,6 +12,7 @@ import {
 } from "@/lib/admin-mock";
 import { useAdminStore } from "@/components/admin/admin-store";
 import { ConfirmModal } from "@/components/admin/confirm-modal";
+import { SendReminderButton } from "@/components/admin/send-reminder";
 import { useNavPending } from "@/components/admin/nav-pending";
 import { useSuccess } from "@/components/admin/success-modal";
 import {
@@ -354,6 +355,25 @@ export function EventForm({ eventId }: { eventId?: string }) {
           ))}
         </ul>
       </section>
+
+      {eventId ? (
+        <section className="rounded-2xl border border-line bg-white p-5">
+          <h2 className="text-base font-black text-ink">Reminder email</h2>
+          {existing?.status === "published" ? (
+            <>
+              <p className="mt-1 text-sm text-muted">
+                Email everyone with a confirmed ticket a reminder that the event is today, with the
+                time, the venue, and a note to bring their QR code. You can add a short line before it sends.
+              </p>
+              <div className="mt-4">
+                <SendReminderButton eventId={eventId} title={existing.title} variant="button" />
+              </div>
+            </>
+          ) : (
+            <p className="mt-1 text-sm text-muted">Publish and save this event before sending a reminder.</p>
+          )}
+        </section>
+      ) : null}
 
       {error ? (
         <p role="alert" className="text-sm font-bold text-brand">

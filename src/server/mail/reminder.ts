@@ -5,9 +5,24 @@ import { HttpError } from "@/server/http";
 import { loadMailOrder, loadTickets } from "@/server/mail/order";
 import { sendMail } from "@/server/mail/send";
 import { batchTickets } from "@/server/mail/tickets";
-import { countdown, escapeHtml, eventDetails, eventSchedule, layout, textLine } from "@/server/mail/template";
+import {
+  button,
+  escapeHtml,
+  eventDetails,
+  eventSchedule,
+  eventTitle,
+  layout,
+  textLine,
+} from "@/server/mail/template";
 
-const font = "font-family:'Anek Bangla',Arial,Helvetica,sans-serif";
+function noteBlock(note: string) {
+  const html = escapeHtml(note).replaceAll("\n", "<br>");
+  return textLine(html, { size: 12, color: "#141414" });
+}
+
+function directionsLink(venue: string) {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(venue)}`;
+}
 
 export function reminderHtml(input: {
   name: string;
@@ -15,28 +30,31 @@ export function reminderHtml(input: {
   startsAt: Date;
   endsAt: Date;
   venue: string;
+  ticketCount: number;
   note?: string;
 }) {
   const schedule = eventSchedule(input.startsAt, input.endsAt);
-  const when = countdown(input.startsAt);
   const note = input.note?.trim();
+  const tickets =
+    input.ticketCount === 1
+      ? "You have 1 ticket on this email."
+      : `You have ${input.ticketCount} tickets on this email.`;
   return layout({
-    preheader: `${input.title} ${when}`,
-    dark: "#141414",
+    preheader: `${input.title} is today.`,
     body: `
-      ${textLine(`Hi ${escapeHtml(input.name || "there")}!`, { size: 12 })}
-      ${textLine("This is your reminder to prepare yourself.", { size: 12, weight: 500 })}
-      ${textLine(
-        `<span style="${font};font-weight:500">${escapeHtml(input.title.toUpperCase())}</span> ${escapeHtml(when)}`,
-        { size: 12 },
-      )}
-      ${note ? textLine(escapeHtml(note), { size: 12, color: "#141414" }) : ""}
+      ${textLine(`Hi ${escapeHtml(input.name || "there")},`)}
+      ${textLine("This is your reminder. The event is today.", { weight: 500 })}
+      ${eventTitle(input.title)}
       ${eventDetails({ ...schedule, venue: input.venue })}
+      ${note ? noteBlock(note) : ""}
+      ${textLine("Bring the QR code from your ticket email and show it at the entrance.", { size: 12 })}
+      ${textLine(tickets, { size: 12, margin: "0" })}
+      ${button("Get directions", directionsLink(input.venue))}
     `,
   });
 }
 
-/** One reminder per ticket holder for a published event. `note` is the short line under the countdown. */
+/** One reminder per ticket holder for a published event. `note` is an optional line from the admin. */
 export async function sendEventReminders(eventId: string, note = "") {
   const sql = getSql();
   const events = await sql<{ id: string }[]>`
@@ -56,13 +74,14 @@ export async function sendEventReminders(eventId: string, note = "") {
         sendMail({
           to: batch.email,
           replyTo: batch.purchaser ? undefined : order.email,
-          subject: `${order.title} is coming up`,
+          subject: `Reminder: ${order.title} is today`,
           html: reminderHtml({
             name: batch.name || "there",
             title: order.title,
             startsAt: order.starts_at,
             endsAt: order.ends_at,
             venue: order.venue,
+            ticketCount: batch.tickets.length,
             note,
           }),
         }),
