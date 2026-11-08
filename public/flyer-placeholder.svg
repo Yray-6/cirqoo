@@ -1,0 +1,13 @@
+<svg width="696" height="870" viewBox="0 0 696 870" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="696" height="870" fill="#1F242F"/>
+  <rect x="48" y="48" width="600" height="774" rx="24" fill="url(#otFlyer)"/>
+  <text x="348" y="390" text-anchor="middle" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="42" font-weight="700">Open Tickets Night</text>
+  <text x="348" y="450" text-anchor="middle" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="22">Saturday, June 20, 2026</text>
+  <text x="348" y="490" text-anchor="middle" fill="#ffffff" font-family="Arial, Helvetica, sans-serif" font-size="18">Sample Hall · 7:00 PM UTC</text>
+  <defs>
+    <linearGradient id="otFlyer" x1="48" y1="48" x2="648" y2="822" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FA87A8"/>
+      <stop offset="1" stop-color="#FDAB86"/>
+    </linearGradient>
+  </defs>
+</svg>
