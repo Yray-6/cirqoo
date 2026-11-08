@@ -549,7 +549,7 @@ export async function confirmOrder(orderId: string) {
 const releasedAfterPayment = "Paid, but the reserved tickets were released and none are left. Refund or re-issue needed.";
 
 /**
- * Confirms an order that Paystack reports as paid. A lapsed hold timer is not a
+ * Confirms an order that the payment provider reports as paid. A lapsed hold timer is not a
  * reason to refuse the money: as long as the tickets are still attached they are
  * sold; if they were already released, the same quantities are re-allocated from
  * what is available, and only when that fails is the problem flagged for an admin.
@@ -604,7 +604,7 @@ export async function finalizePaidOrder(orderId: string, payment: PaymentRecord,
   });
 }
 
-/** Pushes the hold out so a buyer who is already on Paystack's page does not lose the seats mid-payment. */
+/** Pushes the hold out so a buyer who is already on the payment page does not lose the seats mid-payment. */
 export async function extendHold(orderId: string, minutes: number) {
   const sql = getSql();
   const until = new Date(Date.now() + minutes * 60 * 1000).toISOString();

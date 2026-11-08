@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 
 export default function PaymentCallbackPage() {
   return (
-    <Suspense fallback={<PaymentResultShell title="Confirming your payment" body="One moment while we check with Paystack." />}>
+    <Suspense fallback={<PaymentResultShell title="Confirming your payment" body="One moment while we confirm your card payment." />}>
       <PaymentResult />
     </Suspense>
   );

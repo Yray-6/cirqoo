@@ -24,6 +24,7 @@
 .DS_Store
 *.pem
 AGENTS.md
+.cursor/
 
 # debug
 npm-debug.log*

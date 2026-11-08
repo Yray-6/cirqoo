@@ -24,8 +24,20 @@ export function migrationUrl() {
   return process.env.DATABASE_URL_UNPOOLED?.trim() || databaseUrl();
 }
 
-export function paystackSecretKey() {
-  return process.env.PAYSTACK_SECRET_KEY?.trim() ?? "";
+export function paymentSecretKey() {
+  return process.env.PAYMENT_SECRET_KEY?.trim() ?? "";
+}
+
+export function paymentPublicKey() {
+  return process.env.PAYMENT_PUBLIC_KEY?.trim() ?? "";
+}
+
+export function paymentApiBase() {
+  return (process.env.PAYMENT_API_BASE?.trim() ?? "").replace(/\/$/, "");
+}
+
+export function paymentWebhookHeader() {
+  return process.env.PAYMENT_WEBHOOK_HEADER?.trim() || "x-payment-signature";
 }
 
 export function cronSecret() {

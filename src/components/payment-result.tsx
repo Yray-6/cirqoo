@@ -97,7 +97,7 @@ export function PaymentResult() {
   }, [reference]);
 
   if (view.kind === "checking") {
-    return <PaymentResultShell title="Confirming your payment" body="One moment while we check with Paystack." />;
+    return <PaymentResultShell title="Confirming your payment" body="One moment while we confirm your card payment." />;
   }
   if (view.kind === "paid") {
     return (
@@ -124,7 +124,7 @@ export function PaymentResult() {
     return (
       <PaymentResultShell
         title="Payment still processing"
-        body="Paystack has not confirmed the payment yet. Bank transfers can take a minute. Check again, or wait for the email."
+        body="The payment has not been confirmed yet. Bank transfers can take a minute. Check again, or wait for the email."
       >
         <div className="flex flex-col gap-3 min-[1100px]:flex-row">
           <button type="button" onClick={() => void check()} disabled={busy} className={primary}>

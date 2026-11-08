@@ -1,5 +1,5 @@
 import { HttpError, asString, isRecord, readJson } from "@/server/http";
-import { settlePayment } from "@/server/paystack";
+import { settlePayment } from "@/server/payments";
 import { apiPost } from "@/server/route";
 import { holdCookie } from "@/server/session-token";
 

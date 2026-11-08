@@ -2,7 +2,7 @@ import "server-only";
 
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { getSql } from "@/server/db";
-import { appOrigin, paystackSecretKey } from "@/server/env";
+import { appOrigin, paymentApiBase, paymentSecretKey, paymentWebhookHeader } from "@/server/env";
 import { HttpError, isRecord } from "@/server/http";
 import {
   deliverPaidOrder,
@@ -14,20 +14,25 @@ import {
 } from "@/server/inventory";
 import { asDate } from "@/server/time";
 
-const apiBase = "https://api.paystack.co";
 const payWindowMinutes = 15;
 
 function secret() {
-  const key = paystackSecretKey();
+  const key = paymentSecretKey();
   if (!key) throw new HttpError(503, "Payments are not configured.");
   return key;
 }
 
-async function paystack<T>(path: string, init?: { method?: string; body?: unknown }) {
+function apiBase() {
+  const base = paymentApiBase();
+  if (!base) throw new HttpError(503, "Payments are not configured.");
+  return base;
+}
+
+async function paymentApi<T>(path: string, init?: { method?: string; body?: unknown }) {
   const key = secret();
   let response: Response;
   try {
-    response = await fetch(`${apiBase}${path}`, {
+    response = await fetch(`${apiBase()}${path}`, {
       method: init?.method ?? "GET",
       headers: {
         authorization: `Bearer ${key}`,
@@ -37,13 +42,13 @@ async function paystack<T>(path: string, init?: { method?: string; body?: unknow
       cache: "no-store",
     });
   } catch {
-    throw new HttpError(502, "Paystack could not be reached.");
+    throw new HttpError(502, "The payment provider could not be reached.");
   }
   const payload = (await response.json().catch(() => null)) as unknown;
   if (!isRecord(payload) || payload.status !== true || !isRecord(payload.data)) {
     const message = isRecord(payload) && typeof payload.message === "string" ? payload.message : "";
-    console.error(`paystack ${path} failed: ${response.status} ${message}`);
-    throw new HttpError(502, "Paystack rejected the request.");
+    console.error(`payments ${path} failed: ${response.status} ${message}`);
+    throw new HttpError(502, "The payment provider rejected the request.");
   }
   return payload.data as T;
 }
@@ -73,7 +78,7 @@ export async function initializePayment(orderId: string) {
 
   const reference = `CRQ-${randomUUID().replaceAll("-", "")}`;
   await extendHold(orderId, payWindowMinutes);
-  const data = await paystack<{ authorization_url: string; reference: string }>("/transaction/initialize", {
+  const data = await paymentApi<{ authorization_url: string; reference: string }>("/transaction/initialize", {
     method: "POST",
     body: {
       email: order.email,
@@ -88,7 +93,7 @@ export async function initializePayment(orderId: string) {
       },
     },
   });
-  if (!data.authorization_url) throw new HttpError(502, "Paystack rejected the request.");
+  if (!data.authorization_url) throw new HttpError(502, "The payment provider rejected the request.");
   await sql`UPDATE orders SET payment_reference = ${reference} WHERE id = ${orderId}`;
   return { url: data.authorization_url, reference };
 }
@@ -128,7 +133,7 @@ function readMetadata(raw: unknown): { orderId: string; lines: HoldLine[] } {
 
 export async function verifyTransaction(reference: string): Promise<VerifiedTransaction> {
   if (!/^[A-Za-z0-9\-.=]{1,100}$/.test(reference)) throw new HttpError(400, "That payment reference is not valid.");
-  const data = await paystack<{
+  const data = await paymentApi<{
     reference?: string;
     status?: string;
     amount?: number;
@@ -158,6 +163,10 @@ export function verifyWebhookSignature(rawBody: string, header: string | null) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+export function webhookSignatureHeaderName() {
+  return paymentWebhookHeader();
+}
+
 export type SettleResult =
   | { status: "paid"; orderId: string; email: string; already: boolean; problem: string | null }
   | { status: "pending"; orderId: string | null }
@@ -168,7 +177,7 @@ export type SettleSource = "webhook" | "callback";
 const pendingStatuses = new Set(["pending", "ongoing", "processing", "queued", "send_otp", "send_pin", "open"]);
 
 function logSettle(fields: Record<string, unknown>) {
-  console.error(`paystack settle ${JSON.stringify(fields)}`);
+  console.error(`payments settle ${JSON.stringify(fields)}`);
 }
 
 export async function settlePayment(reference: string, source: SettleSource): Promise<SettleResult> {
@@ -234,7 +243,7 @@ export async function settlePayment(reference: string, source: SettleSource): Pr
     return { status: "failed", orderId, reason };
   }
   if (tx.currency !== "NGN" || tx.amountKobo < order.total_kobo) {
-    const problem = `Paystack reported ${tx.currency} ${tx.amountKobo} for an order of NGN ${order.total_kobo} kobo. Check reference ${tx.reference}.`;
+    const problem = `The payment provider reported ${tx.currency} ${tx.amountKobo} for an order of NGN ${order.total_kobo} kobo. Check reference ${tx.reference}.`;
     await sql`
       UPDATE orders SET payment_error = ${problem}, payment_reference = ${tx.reference}
       WHERE id = ${orderId} AND payment_error IS NULL

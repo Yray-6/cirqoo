@@ -67,7 +67,7 @@ export async function sendReceiptEmail(orderId: string) {
               `<li>${escapeHtml(batch.name || batch.email)} &lt;${escapeHtml(batch.email)}&gt; · ${batch.tickets.length} ticket${batch.tickets.length === 1 ? "" : "s"}</li>`,
           )
           .join("")}</ul>`;
-  const channel = order.payment_channel ? order.payment_channel.replaceAll("_", " ") : "Paystack";
+  const channel = order.payment_channel ? order.payment_channel.replaceAll("_", " ") : "Card payment";
   const schedule = eventSchedule(order.starts_at, order.ends_at);
   const extras =
     order.discount_kobo > 0

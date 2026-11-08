@@ -499,7 +499,7 @@ export function CheckoutFlow() {
                   }
                 : step === "payment"
                   ? {
-                      label: redirecting ? "Opening Paystack…" : pending ? "Please wait…" : "Pay now",
+                      label: redirecting ? "Opening payment page…" : pending ? "Please wait…" : "Pay now",
                       enabled: acceptTerms && !expired && !pending,
                       onClick: () => void finishCheckout(),
                     }
@@ -1051,19 +1051,12 @@ function PaymentStep({
               <p className="text-base leading-6 text-ink min-[1100px]:text-[#111827]">
                 Pay with Card or Bank
               </p>
-              <Image
-                src="/paystack-56586a.png"
-                alt="Paystack"
-                width={114}
-                height={20}
-                className="h-5 w-[114px] shrink-0 object-contain"
-              />
             </div>
             <p className="text-sm leading-[22px] text-[#61646C] min-[1100px]:text-base min-[1100px]:leading-[21px]">
               Pay with Mastercard, Visa, or Verve or with bank transfer.
             </p>
             <p className="rounded-lg bg-[#FAFAFA] p-4 text-sm leading-[22px] text-[#61646C] min-[1100px]:text-sm min-[1100px]:leading-[21px]">
-              You will be taken to Paystack&apos;s secure page to pay, then brought
+              You will be taken to a secure payment page to pay, then brought
               back here. Your tickets are emailed as soon as the payment clears.
             </p>
           </div>

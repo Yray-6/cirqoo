@@ -1,5 +1,5 @@
 import { HttpError } from "@/server/http";
-import { initializePayment } from "@/server/paystack";
+import { initializePayment } from "@/server/payments";
 import { apiPost } from "@/server/route";
 import { holdCookie } from "@/server/session-token";
 
